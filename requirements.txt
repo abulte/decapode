@@ -1,2 +1,4 @@
 minicli
 asyncpg
+aiohttp
+progressist
