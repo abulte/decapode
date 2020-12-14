@@ -1,6 +1,7 @@
 import os
 import csv
 import json
+import time
 
 import aiohttp
 import asyncio
@@ -92,7 +93,9 @@ async def check_url(row, session, timeout):
         return
     try:
         # TODO: store response time
+        start = time.time()
         async with session.head(row['url'], timeout=timeout, allow_redirects=True) as resp:
+            end = time.time()
             # /!\ this will only take the first value for a given header key
             headers = {}
             for k in resp.headers.keys():
@@ -102,16 +105,16 @@ async def check_url(row, session, timeout):
                 headers[k.lower()] = value
             async with context['pool'].acquire() as connection:
                 await connection.execute('''
-                    INSERT INTO checks (url, domain, status, headers, timeout)
-                    VALUES ($1, $2, $3, $4, $5)
-                ''', row['url'], url_parsed.netloc, resp.status, json.dumps(headers), False)
+                    INSERT INTO checks (url, domain, status, headers, timeout, response_time)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                ''', row['url'], url_parsed.netloc, resp.status, json.dumps(headers), False, end - start)
     except aiohttp.client_exceptions.ClientConnectorError as e:
         print(f"[error] {row['url']} {e}")
     except asyncio.exceptions.TimeoutError:
         print(f"[timeout] {row['url']}")
 
 
-# TODO: backoff on domain (no more than XX calls on the same domain at each run)
+# TODO: backoff on domain (no more than XX calls on the same domain for YY time)
 @cli
 async def crawl():
     res = await context['conn'].fetch('''
@@ -124,7 +127,10 @@ async def crawl():
     async with aiohttp.ClientSession(timeout=None) as session:
         for row in res:
             tasks.append(check_url(row, session, timeout))
-        await asyncio.gather(*tasks)
+        bar = ProgressBar(total=len(res))
+        for task in asyncio.as_completed(tasks):
+            await task
+            bar.update()
 
 
 @wrap
