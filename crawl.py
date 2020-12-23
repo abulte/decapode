@@ -106,7 +106,25 @@ async def check_url(row, session, sleep=0):
 # TODO: track more stuff on screen
 def refresh_summary(results):
     screen = context['screen']
-    screen.addstr(0, 0, f"{len(results)}\n", curses.A_BOLD)
+
+    screen.addstr(0, 0, "🦀 decapode crawling...", curses.A_BOLD)
+    screen.addstr(1, 0, "")
+
+    for i, status in enumerate(['ok', 'timeout', 'error']):
+        nb = len([r for r in results if r['status'] == status])
+        screen.addstr(i + 2, 0, f'{status}:')
+        screen.addstr(i + 2, 10, f'{nb}')
+
+    screen.addstr(5, 0, "")
+    screen.addstr(6, 0, "Errors", curses.A_DIM)
+    for i, r in enumerate([r for r in results if r['status'] == 'error'][-5:]):
+        screen.addstr(i + 7, 0, r['url'])
+
+    screen.addstr(13, 0, "")
+    screen.addstr(14, 0, "Timeouts", curses.A_DIM)
+    for i, r in enumerate([r for r in results if r['status'] == 'timeout'][-5:]):
+        screen.addstr(i + 15, 0, r['url'])
+
     screen.refresh()
 
 
@@ -146,11 +164,8 @@ async def crawl_urls(to_parse, results):
 
 # TODO:
 # - domain exclude list
-async def crawl(since='4w', domain=None):
-    """Crawl the catalog
-
-    :since: check urls not checked since timespan, defaults to 4w(eeks)
-    """
+async def crawl(since='4w'):
+    """Crawl the catalog"""
     context['pool'] = await asyncpg.create_pool(dsn=DATABASE_URL)
 
     since = parse_timespan(since)  # in seconds
@@ -158,14 +173,14 @@ async def crawl(since='4w', domain=None):
     async with context['pool'].acquire() as connection:
         to_parse = await connection.fetch(
             '''
-                SELECT url FROM catalog
-                WHERE url LIKE $1
-                -- this is way too slow... index?
-                -- AND url NOT IN (SELECT url FROM checks WHERE created_at >= $2)
-                ORDER BY random()
-                LIMIT 100
+            SELECT url FROM catalog
+            -- WHERE url LIKE $1
+            -- this is way too slow... index?
+            -- AND url NOT IN (SELECT url FROM checks WHERE created_at >= $2)
+            ORDER BY random()
+            LIMIT 1000
             ''',
-            'https://static.data.gouv.fr%',
+            # 'https://static.data.gouv.fr%',
             # since,
         )
     results = []
@@ -179,6 +194,7 @@ def run():
         curses.noecho()
         curses.cbreak()
         stdscr.keypad(1)
+        curses.curs_set(0)
         try:
             curses.start_color()
         except:  # noqa
@@ -186,8 +202,10 @@ def run():
         context['screen'] = stdscr
         # TODO: this will get ugly in memory, only aggregated stuff in results
         # maybe make it a "global" var, might display if interrupted
-        # use a log file to output complete run (csv?)
+        # use a log file to output complete run (csv? but don't duplicate the DB!)
         results = asyncio.get_event_loop().run_until_complete(crawl())
+        # FIXME: prevents screen from disappearing
+        stdscr.getch()
     except KeyboardInterrupt:
         pass
     finally:
@@ -197,7 +215,7 @@ def run():
             curses.echo()
             curses.nocbreak()
             curses.endwin()
-        if results:
+        if 'results' in locals():
             print_summary(results)
 
 
