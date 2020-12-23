@@ -19,18 +19,23 @@ from tabulate import tabulate
 DATABASE_URL = os.getenv('DATABASE_URL', 'postgres://postgres:postgres@localhost:5432/postgres')
 CATALOG_URL = 'https://www.data.gouv.fr/fr/datasets/r/4babf5f2-6a9c-45b5-9144-ca5eae6a7a6d'
 
+# max number of _completed_ requests per domain per period
+BACKOFF_NB_REQ = 1800
+BACKOFF_PERIOD = 3600  # in seconds
+
 context = {}
 
 
 @cli
 async def init_db(drop=False, table=None):
     """Create the DB structure"""
+    conn = await asyncpg.connect(dsn=DATABASE_URL)
     if drop:
         if table == 'catalog' or not table:
-            await context['conn'].execute('DROP TABLE catalog')
+            await conn.execute('DROP TABLE catalog')
         if table == 'checks' or not table:
-            await context['conn'].execute('DROP TABLE checks')
-    await context['conn'].execute('''
+            await conn.execute('DROP TABLE checks')
+    await conn.execute('''
         CREATE TABLE IF NOT EXISTS catalog(
             id serial PRIMARY KEY,
             dataset_id VARCHAR(24),
@@ -40,7 +45,7 @@ async def init_db(drop=False, table=None):
             UNIQUE(dataset_id, resource_id, url)
         )
     ''')
-    await context['conn'].execute('''
+    await conn.execute('''
         CREATE TABLE IF NOT EXISTS checks(
             id serial PRIMARY KEY,
             url VARCHAR,
@@ -52,11 +57,13 @@ async def init_db(drop=False, table=None):
             response_time FLOAT
         )
     ''')
+    await conn.close()
 
 
 @cli
 async def load_catalog(url=CATALOG_URL):
     """Load the catalog into DB from CSV file"""
+    conn = await asyncpg.connect(dsn=DATABASE_URL)
     try:
         print('Downloading catalog...')
         fd = NamedTemporaryFile(delete=False)
@@ -87,6 +94,7 @@ async def load_catalog(url=CATALOG_URL):
     finally:
         fd.close()
         os.unlink(fd.name)
+        await conn.close()
 
 
 async def insert_check(data):
@@ -101,7 +109,19 @@ async def insert_check(data):
         await connection.execute(q, *data.values())
 
 
-async def check_url(row, session, timeout):
+async def is_backoff(domain):
+    since = datetime.utcnow() - timedelta(seconds=BACKOFF_PERIOD)
+    async with context['pool'].acquire() as connection:
+        res = await connection.fetch('''
+            SELECT COUNT(*) FROM checks
+            WHERE domain = $1
+            AND created_at >= $2
+        ''', domain, since)
+        print(res[0]['count'])
+        return res[0]['count'] >= BACKOFF_NB_REQ
+
+
+async def check_url(row, session, sleep=0):
 
     # TODO: make this a (data)class?
     def return_structure(status, url, details=None):
@@ -111,12 +131,24 @@ async def check_url(row, session, timeout):
             'details': details,
         }
 
+    if sleep:
+        await asyncio.sleep(sleep)
+
     url_parsed = urlparse(row['url'])
-    if not url_parsed.netloc:
+    domain = url_parsed.netloc
+    if not domain:
         print(f"[warning] not netloc in url, skipping {row['url']}")
         return
+
+    if await is_backoff(domain):
+        print(f'backoff {domain}')
+        return await check_url(row, session, timeout, sleep=BACKOFF_PERIOD / BACKOFF_NB_REQ)
+    else:
+        print('not backing off')
+
     try:
         start = time.time()
+        timeout = aiohttp.ClientTimeout(total=5)
         async with session.head(row['url'], timeout=timeout, allow_redirects=True) as resp:
             end = time.time()
             # /!\ this will only take the first value for a given header key
@@ -129,7 +161,7 @@ async def check_url(row, session, timeout):
                 headers[k.lower()] = value
             await insert_check({
                 'url': row['url'],
-                'domain': url_parsed.netloc,
+                'domain': domain,
                 'status': resp.status,
                 'headers': json.dumps(headers),
                 'timeout': False,
@@ -158,25 +190,29 @@ async def crawl(since='4w', domain=None):
     """
     since = parse_timespan(since)  # in seconds
     since = datetime.now() - timedelta(seconds=since)
-    res = await context['conn'].fetch('''
-        SELECT url FROM catalog
-        WHERE url NOT LIKE $1
-        AND url NOT IN (SELECT url FROM checks WHERE created_at >= $2)
-        ORDER BY random()
-        LIMIT 100
-    ''', 'https://static.data.gouv.fr%', since)
-    timeout = aiohttp.ClientTimeout(total=5)
+    async with context['pool'].acquire() as connection:
+        res = await connection.fetch('''
+            SELECT url FROM catalog
+            WHERE url LIKE $1
+            -- this is way too slow... index?
+            -- AND url NOT IN (SELECT url FROM checks WHERE created_at >= $2)
+            ORDER BY random()
+            LIMIT 10
+        ''',
+        'https://static.data.gouv.fr%',
+        # since,
+        )
     tasks = []
     results = []
     async with aiohttp.ClientSession(timeout=None) as session:
         for row in res:
-            tasks.append(check_url(row, session, timeout))
+            tasks.append(check_url(row, session))
         bar = ProgressBar(total=len(res))
         for task in asyncio.as_completed(tasks):
             result = await task
             results.append(result)
             bar.update()
-    # print summary
+    # TODO: print summary
     # - total checked, aggregated by domain?
     # - total left to check from catalog (because limit)
     oks = [r for r in results if r['status'] == 'ok']
@@ -199,9 +235,7 @@ async def crawl(since='4w', domain=None):
 @wrap
 async def wrapper():
     context['pool'] = await asyncpg.create_pool(dsn=DATABASE_URL)
-    context['conn'] = await asyncpg.connect(dsn=DATABASE_URL)
     yield
-    await context['conn'].close()
 
 
 if __name__ == '__main__':
