@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import time
 
@@ -14,6 +15,14 @@ from humanfriendly import parse_timespan
 
 from monitor import Monitor
 
+# TODO: move elsewhere
+log = logging.getLogger(__name__)
+handler = logging.FileHandler('crawl.log')
+formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+handler.setFormatter(formatter)
+log.addHandler(handler)
+log.setLevel(logging.DEBUG)
+
 context = {}
 results = defaultdict(int)
 
@@ -23,6 +32,11 @@ STATUS_ERROR = 'error'
 
 # TODO: move to config
 DATABASE_URL = os.getenv('DATABASE_URL', 'postgres://postgres:postgres@localhost:5432/postgres')
+# sql syntax (% escaped w/ %)
+EXCLUDED_PATTERNS = [
+    'http%data.gouv.fr%',
+    'http%example.com%',
+]
 # max number of _completed_ requests per domain per period
 BACKOFF_NB_REQ = 1800
 BACKOFF_PERIOD = 3600  # in seconds
@@ -62,13 +76,15 @@ async def check_url(row, session, sleep=0):
     url_parsed = urlparse(row['url'])
     domain = url_parsed.netloc
     if not domain:
-        print(f"[warning] not netloc in url, skipping {row['url']}")
+        log.warning(f"[warning] not netloc in url, skipping {row['url']}")
         return
 
     if await is_backoff(domain):
-        # TODO: move to curses, it does _not_ like printed stuff while in curses window
-        print(f'backoff {domain}')
+        log.info(f'backoff {domain}')
+        context['monitor'].add_backoff(domain)
         return await check_url(row, session, sleep=BACKOFF_PERIOD / BACKOFF_NB_REQ)
+    else:
+        context['monitor'].remove_backoff(domain)
 
     try:
         start = time.time()
@@ -123,8 +139,6 @@ async def crawl_urls(to_parse):
             context['monitor'].refresh(results)
 
 
-# TODO:
-# - domain exclude list
 async def crawl(since='1w'):
     """Crawl the catalog"""
     BATCH_SIZE = 100
@@ -134,15 +148,18 @@ async def crawl(since='1w'):
 
     context['monitor'].set_status('Getting a batch from catalog...')
     async with context['pool'].acquire() as connection:
+        excluded = ' AND '.join([f"catalog.url NOT LIKE '{p}'" for p in EXCLUDED_PATTERNS])
         # urls without checks first
         q = f'''
             SELECT * FROM (
                 SELECT DISTINCT(catalog.url)
                 FROM catalog
                 WHERE catalog.last_check IS NULL
+                AND {excluded}
             ) s
             ORDER BY random() LIMIT {BATCH_SIZE};
         '''
+        log.info(q)
         to_check = await connection.fetch(q)
         # if not enough for our batch size, handle outdated checks
         if len(to_check) < BATCH_SIZE:
@@ -154,6 +171,7 @@ async def crawl(since='1w'):
                 SELECT DISTINCT(catalog.url)
                 FROM catalog, checks
                 WHERE catalog.last_check IS NOT NULL
+                AND {excluded}
                 AND catalog.last_check = checks.id
                 AND checks.created_at <= $1
             ) s
