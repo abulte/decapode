@@ -89,6 +89,7 @@ async def load_catalog(url=CATALOG_URL):
         os.unlink(fd.name)
 
 
+# TODO: account for `SINCE`, not only last_check (2nd query...)
 @cli
 async def summary():
     from tabulate import tabulate
@@ -135,6 +136,7 @@ async def summary():
         GROUP BY status
         ORDER BY count DESC;
     '''
+    print()
     print(tabulate(await context['conn'].fetch(q), headers=['HTTP code', 'Count']))
 
 
