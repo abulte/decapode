@@ -13,6 +13,7 @@ import asyncpg
 
 from humanfriendly import parse_timespan
 
+import config
 from monitor import Monitor
 
 # TODO: move elsewhere
@@ -30,17 +31,7 @@ STATUS_OK = 'ok'
 STATUS_TIMEOUT = 'timeout'
 STATUS_ERROR = 'error'
 
-# TODO: move to config
 DATABASE_URL = os.getenv('DATABASE_URL', 'postgres://postgres:postgres@localhost:5432/postgres')
-# sql NOT LIKE syntax
-EXCLUDED_PATTERNS = [
-    'http%data.gouv.fr%',
-    # opendatasoft shp
-    '%?format=shp%',
-]
-# max number of _completed_ requests per domain per period
-BACKOFF_NB_REQ = 180
-BACKOFF_PERIOD = 360  # in seconds
 
 
 async def insert_check(data):
@@ -59,14 +50,14 @@ async def insert_check(data):
 
 
 async def is_backoff(domain):
-    since = datetime.utcnow() - timedelta(seconds=BACKOFF_PERIOD)
+    since = datetime.utcnow() - timedelta(seconds=config.BACKOFF_PERIOD)
     async with context['pool'].acquire() as connection:
         res = await connection.fetchrow('''
             SELECT COUNT(*) FROM checks
             WHERE domain = $1
             AND created_at >= $2
         ''', domain, since)
-        return res['count'] >= BACKOFF_NB_REQ, res['count']
+        return res['count'] >= config.BACKOFF_NB_REQ, res['count']
 
 
 async def check_url(row, session, sleep=0):
@@ -90,7 +81,8 @@ async def check_url(row, session, sleep=0):
     if should_backoff:
         log.info(f'backoff {domain} ({nb_req})')
         context['monitor'].add_backoff(domain, nb_req)
-        return await check_url(row, session, sleep=BACKOFF_PERIOD / BACKOFF_NB_REQ)
+        return await check_url(row, session,
+                               sleep=config.BACKOFF_PERIOD / config.BACKOFF_NB_REQ)
     else:
         context['monitor'].remove_backoff(domain)
 
@@ -166,13 +158,14 @@ async def crawl(**kwargs):
 
 
 def get_excluded_clause():
-    return ' AND '.join([f"catalog.url NOT LIKE '{p}'" for p in EXCLUDED_PATTERNS])
+    return ' AND '.join([f"catalog.url NOT LIKE '{p}'" for p in config.EXCLUDED_PATTERNS])
 
 
-async def crawl_batch(since='1w', batch_size=100):
+async def crawl_batch():
     """Crawl a batch from the catalog"""
     context['monitor'].init(
-        BATCH_SIZE=100, BACKOFF_NB_REQ=BACKOFF_NB_REQ, BACKOFF_PERIOD=BACKOFF_PERIOD
+        SINCE=config.SINCE, BATCH_SIZE=config.BATCH_SIZE,
+        BACKOFF_NB_REQ=config.BACKOFF_NB_REQ, BACKOFF_PERIOD=config.BACKOFF_PERIOD
     )
     context['monitor'].set_status('Getting a batch from catalog...')
     async with context['pool'].acquire() as connection:
@@ -186,14 +179,14 @@ async def crawl_batch(since='1w', batch_size=100):
                 AND {excluded}
                 AND deleted = False
             ) s
-            ORDER BY random() LIMIT {batch_size};
+            ORDER BY random() LIMIT {config.BATCH_SIZE};
         '''
         to_check = await connection.fetch(q)
         # if not enough for our batch size, handle outdated checks
-        if len(to_check) < batch_size:
-            since = parse_timespan(since)  # in seconds
+        if len(to_check) < config.BATCH_SIZE:
+            since = parse_timespan(config.SINCE)  # in seconds
             since = datetime.utcnow() - timedelta(seconds=since)
-            limit = batch_size - len(to_check)
+            limit = config.BATCH_SIZE - len(to_check)
             q = f'''
             SELECT * FROM (
                 SELECT DISTINCT(catalog.url)
@@ -221,8 +214,6 @@ def run():
         monitor = Monitor()
         context['monitor'] = monitor
         asyncio.get_event_loop().run_until_complete(crawl())
-        # FIXME: prevents screen from disappearing
-        monitor.listen()
     except KeyboardInterrupt:
         pass
     finally:
