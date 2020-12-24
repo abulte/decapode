@@ -1,8 +1,8 @@
-import curses
 import json
 import os
 import time
 
+from collections import defaultdict
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 
@@ -11,12 +11,17 @@ import asyncio
 import asyncpg
 
 from humanfriendly import parse_timespan
-from tabulate import tabulate
 
 from monitor import Monitor
 
 context = {}
+results = defaultdict(int)
 
+STATUS_OK = 'ok'
+STATUS_TIMEOUT = 'timeout'
+STATUS_ERROR = 'error'
+
+# TODO: move to config
 DATABASE_URL = os.getenv('DATABASE_URL', 'postgres://postgres:postgres@localhost:5432/postgres')
 # max number of _completed_ requests per domain per period
 BACKOFF_NB_REQ = 1800
@@ -50,14 +55,6 @@ async def is_backoff(domain):
 
 
 async def check_url(row, session, sleep=0):
-
-    # TODO: make this a (data)class?
-    def return_structure(status, url, details=None):
-        return {
-            'status': status,
-            'url': url,
-            'details': details,
-        }
 
     if sleep:
         await asyncio.sleep(sleep)
@@ -96,7 +93,7 @@ async def check_url(row, session, sleep=0):
                 'timeout': False,
                 'response_time': end - start,
             })
-            return return_structure('ok', row['url'], None)
+            return STATUS_OK
     except aiohttp.client_exceptions.ClientError as e:
         await insert_check({
             'url': row['url'],
@@ -104,40 +101,17 @@ async def check_url(row, session, sleep=0):
             'timeout': False,
             'error': str(e)
         })
-        return return_structure('error', row['url'], e)
+        return STATUS_ERROR
     except asyncio.exceptions.TimeoutError:
         await insert_check({
             'url': row['url'],
             'domain': domain,
             'timeout': True,
         })
-        return return_structure('timeout', row['url'], None)
+        return STATUS_TIMEOUT
 
 
-def print_summary(results):
-    # TODO: print summary
-    # - total checked, aggregated by domain?
-    # - total left to check from catalog (because limit)
-    # - print on errors too (finally:)
-    oks = [r for r in results if r['status'] == 'ok']
-    timeouts = [r for r in results if r['status'] == 'timeout']
-    errors = [r for r in results if r['status'] == 'error']
-    table = [
-        ['checked urls', len(results)],
-        ['oks', len(oks)],
-        ['timeouts', len(timeouts)],
-        ['errors', len(errors)],
-    ]
-    print(f'\n{tabulate(table)}')
-    if errors:
-        print('\nErrors:')
-        for r in errors:
-            print('-' * 7)
-            print(r['url'])
-            print(r['details'])
-
-
-async def crawl_urls(to_parse, results):
+async def crawl_urls(to_parse):
     context['monitor'].set_status('Crawling urls...')
     tasks = []
     async with aiohttp.ClientSession(timeout=None) as session:
@@ -145,7 +119,7 @@ async def crawl_urls(to_parse, results):
             tasks.append(check_url(row, session))
         for task in asyncio.as_completed(tasks):
             result = await task
-            results.append(result)
+            results[result] += 1
             context['monitor'].refresh(results)
 
 
@@ -187,10 +161,8 @@ async def crawl(since='1w'):
             '''
             to_check += await connection.fetch(q, since)
 
-    results = []
-    await crawl_urls(to_check, results)
+    await crawl_urls(to_check)
     context['monitor'].set_status('Crawling done.')
-    return results
 
 
 def run():
@@ -200,7 +172,7 @@ def run():
         # TODO: this will get ugly in memory, only aggregated stuff in results
         # maybe make it a "global" var, might display if interrupted
         # use a log file to output complete run (csv? but don't duplicate the DB!)
-        results = asyncio.get_event_loop().run_until_complete(crawl())
+        asyncio.get_event_loop().run_until_complete(crawl())
         # FIXME: prevents screen from disappearing
         monitor.listen()
     except KeyboardInterrupt:
@@ -208,8 +180,6 @@ def run():
     finally:
         if 'monitor' in locals():
             monitor.teardown()
-        if 'results' in locals():
-            print_summary(results)
 
 
 if __name__ == "__main__":

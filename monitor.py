@@ -40,9 +40,9 @@ class Monitor():
         # start line after init and status
         START = 5
 
+        # TODO: use config vars from crawl.py
         for i, status in enumerate(['ok', 'timeout', 'error']):
-            nb = len([r for r in results if r['status'] == status])
             self.screen.addstr(i + START, 0, f'{status}:')
-            self.screen.addstr(i + START, 10, f'{nb}')
+            self.screen.addstr(i + START, 10, f"{results[status]}")
 
         self.screen.refresh()
