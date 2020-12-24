@@ -14,7 +14,7 @@ context = {}
 
 
 @cli
-async def init_db(drop=False, table=None):
+async def init_db(drop=False, table=None, index=False):
     """Create the DB structure"""
     if drop:
         if table == 'catalog' or not table:
@@ -28,6 +28,7 @@ async def init_db(drop=False, table=None):
             resource_id UUID,
             url VARCHAR,
             deleted BOOLEAN NOT NULL,
+            last_check INT,
             UNIQUE(dataset_id, resource_id, url)
         )
     ''')
@@ -43,6 +44,13 @@ async def init_db(drop=False, table=None):
             response_time FLOAT
         )
     ''')
+    if index:
+        await context['conn'].execute('''
+            DROP INDEX IF EXISTS url_idx;
+            CREATE INDEX url_idx ON checks (url);
+            DROP INDEX IF EXISTS domain_idx;
+            CREATE INDEX domain_idx ON checks (domain);
+        ''')
 
 
 @cli

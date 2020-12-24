@@ -13,11 +13,13 @@ import asyncpg
 from humanfriendly import parse_timespan
 from tabulate import tabulate
 
+from monitor import Monitor
+
 context = {}
 
 DATABASE_URL = os.getenv('DATABASE_URL', 'postgres://postgres:postgres@localhost:5432/postgres')
 # max number of _completed_ requests per domain per period
-BACKOFF_NB_REQ = 3600 * 2
+BACKOFF_NB_REQ = 1800
 BACKOFF_PERIOD = 3600  # in seconds
 
 
@@ -28,9 +30,12 @@ async def insert_check(data):
     q = f'''
         INSERT INTO checks ({columns})
         VALUES ({placeholders})
+        RETURNING id
     '''
     async with context['pool'].acquire() as connection:
-        await connection.execute(q, *data.values())
+        last_check = await connection.fetchrow(q, *data.values())
+        q = '''UPDATE catalog SET last_check = $1 WHERE url = $2'''
+        await connection.execute(q, last_check['id'], data['url'])
 
 
 async def is_backoff(domain):
@@ -103,31 +108,6 @@ async def check_url(row, session, sleep=0):
         return return_structure('timeout', row['url'], None)
 
 
-# TODO: track more stuff on screen
-def refresh_summary(results):
-    screen = context['screen']
-
-    screen.addstr(0, 0, "🦀 decapode crawling...", curses.A_BOLD)
-    screen.addstr(1, 0, "")
-
-    for i, status in enumerate(['ok', 'timeout', 'error']):
-        nb = len([r for r in results if r['status'] == status])
-        screen.addstr(i + 2, 0, f'{status}:')
-        screen.addstr(i + 2, 10, f'{nb}')
-
-    screen.addstr(5, 0, "")
-    screen.addstr(6, 0, "Errors", curses.A_DIM)
-    for i, r in enumerate([r for r in results if r['status'] == 'error'][-5:]):
-        screen.addstr(i + 7, 0, r['url'])
-
-    screen.addstr(13, 0, "")
-    screen.addstr(14, 0, "Timeouts", curses.A_DIM)
-    for i, r in enumerate([r for r in results if r['status'] == 'timeout'][-5:]):
-        screen.addstr(i + 15, 0, r['url'])
-
-    screen.refresh()
-
-
 def print_summary(results):
     # TODO: print summary
     # - total checked, aggregated by domain?
@@ -152,6 +132,7 @@ def print_summary(results):
 
 
 async def crawl_urls(to_parse, results):
+    context['monitor'].set_status('Crawling urls...')
     tasks = []
     async with aiohttp.ClientSession(timeout=None) as session:
         for row in to_parse:
@@ -159,62 +140,68 @@ async def crawl_urls(to_parse, results):
         for task in asyncio.as_completed(tasks):
             result = await task
             results.append(result)
-            refresh_summary(results)
+            context['monitor'].refresh(results)
 
 
 # TODO:
 # - domain exclude list
-async def crawl(since='4w'):
+async def crawl(since='1w'):
     """Crawl the catalog"""
+    BATCH_SIZE = 100
+
+    context['monitor'].init(BATCH_SIZE)
     context['pool'] = await asyncpg.create_pool(dsn=DATABASE_URL)
 
-    since = parse_timespan(since)  # in seconds
-    since = datetime.now() - timedelta(seconds=since)
+    context['monitor'].set_status('Getting a batch from catalog...')
     async with context['pool'].acquire() as connection:
-        to_parse = await connection.fetch(
+        # urls without checks first
+        q = f'''
+            SELECT * FROM (
+                SELECT DISTINCT(catalog.url)
+                FROM catalog
+                WHERE catalog.last_check IS NULL
+            ) s
+            ORDER BY random() LIMIT {BATCH_SIZE};
+        '''
+        to_check = await connection.fetch(q)
+        # if not enough for our batch size, handle outdated checks
+        if len(to_check) < BATCH_SIZE:
+            since = parse_timespan(since)  # in seconds
+            since = datetime.utcnow() - timedelta(seconds=since)
+            limit = BATCH_SIZE - len(to_check)
+            q = f'''
+            SELECT * FROM (
+                SELECT DISTINCT(catalog.url)
+                FROM catalog, checks
+                WHERE catalog.last_check IS NOT NULL
+                AND catalog.last_check = checks.id
+                AND checks.created_at <= $1
+            ) s
+            ORDER BY random() LIMIT {limit};
             '''
-            SELECT url FROM catalog
-            -- WHERE url LIKE $1
-            -- this is way too slow... index?
-            -- AND url NOT IN (SELECT url FROM checks WHERE created_at >= $2)
-            ORDER BY random()
-            LIMIT 1000
-            ''',
-            # 'https://static.data.gouv.fr%',
-            # since,
-        )
+            to_check += await connection.fetch(q, since)
+
     results = []
-    await crawl_urls(to_parse, results)
+    await crawl_urls(to_check, results)
+    context['monitor'].set_status('Crawling done.')
     return results
 
 
 def run():
     try:
-        stdscr = curses.initscr()
-        curses.noecho()
-        curses.cbreak()
-        stdscr.keypad(1)
-        curses.curs_set(0)
-        try:
-            curses.start_color()
-        except:  # noqa
-            pass
-        context['screen'] = stdscr
+        monitor = Monitor()
+        context['monitor'] = monitor
         # TODO: this will get ugly in memory, only aggregated stuff in results
         # maybe make it a "global" var, might display if interrupted
         # use a log file to output complete run (csv? but don't duplicate the DB!)
         results = asyncio.get_event_loop().run_until_complete(crawl())
         # FIXME: prevents screen from disappearing
-        stdscr.getch()
+        monitor.listen()
     except KeyboardInterrupt:
         pass
     finally:
-        # Set everything back to normal
-        if 'stdscr' in locals():
-            stdscr.keypad(0)
-            curses.echo()
-            curses.nocbreak()
-            curses.endwin()
+        if 'monitor' in locals():
+            monitor.teardown()
         if 'results' in locals():
             print_summary(results)
 
