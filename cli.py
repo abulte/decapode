@@ -41,7 +41,8 @@ async def init_db(drop=False, table=None, index=False):
             status INT,
             headers JSONB,
             timeout BOOLEAN NOT NULL,
-            response_time FLOAT
+            response_time FLOAT,
+            error VARCHAR
         )
     ''')
     if index:

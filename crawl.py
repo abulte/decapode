@@ -98,11 +98,17 @@ async def check_url(row, session, sleep=0):
             })
             return return_structure('ok', row['url'], None)
     except aiohttp.client_exceptions.ClientError as e:
-        # TODO: store results
+        await insert_check({
+            'url': row['url'],
+            'domain': domain,
+            'timeout': False,
+            'error': str(e)
+        })
         return return_structure('error', row['url'], e)
     except asyncio.exceptions.TimeoutError:
         await insert_check({
             'url': row['url'],
+            'domain': domain,
             'timeout': True,
         })
         return return_structure('timeout', row['url'], None)
