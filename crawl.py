@@ -16,7 +16,6 @@ from humanfriendly import parse_timespan
 import config
 from monitor import Monitor
 
-# TODO: move elsewhere
 log = logging.getLogger(__name__)
 handler = logging.FileHandler('crawl.log')
 formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
@@ -146,17 +145,6 @@ async def crawl_urls(to_parse):
             context['monitor'].refresh(results)
 
 
-async def crawl(**kwargs):
-    try:
-        context['pool'] = await asyncpg.create_pool(dsn=DATABASE_URL, max_size=50)
-        while True:
-            await crawl_batch(**kwargs)
-    finally:
-        if 'pool' in context:
-            print('Closing pool...')
-            await context['pool'].close()
-
-
 def get_excluded_clause():
     return ' AND '.join([f"catalog.url NOT LIKE '{p}'" for p in config.EXCLUDED_PATTERNS])
 
@@ -207,6 +195,17 @@ async def crawl_batch():
         context['monitor'].set_status('Nothing to crawl for now.')
         await asyncio.sleep(60)
     context['monitor'].set_status('Crawling done.')
+
+
+async def crawl(**kwargs):
+    try:
+        context['pool'] = await asyncpg.create_pool(dsn=DATABASE_URL, max_size=50)
+        while True:
+            await crawl_batch(**kwargs)
+    finally:
+        if 'pool' in context:
+            print('Closing pool...')
+            await context['pool'].close()
 
 
 def run():
