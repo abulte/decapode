@@ -109,12 +109,11 @@ async def check_url(row, session, sleep=0):
                 'response_time': end - start,
             })
             return STATUS_OK
-    # TODO: debug this one, should be caught in DB now
+    # TODO: debug AssertionError, should be caught in DB now
     # File "[...]aiohttp/connector.py", line 991, in _create_direct_connection
     # assert port is not None
-    # TODO: and this one too
-    # for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
     # UnicodeError: encoding with 'idna' codec failed (UnicodeError: label too long)
+    # eg http://%20Localisation%20des%20acc%C3%A8s%20des%20offices%20de%20tourisme
     except (aiohttp.client_exceptions.ClientError, AssertionError, UnicodeError) as e:
         await insert_check({
             'url': row['url'],
