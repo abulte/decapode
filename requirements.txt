@@ -3,3 +3,4 @@ asyncpg
 aiohttp
 progressist
 humanfriendly
+tabulate
