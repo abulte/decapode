@@ -32,14 +32,15 @@ STATUS_ERROR = 'error'
 
 # TODO: move to config
 DATABASE_URL = os.getenv('DATABASE_URL', 'postgres://postgres:postgres@localhost:5432/postgres')
-# sql syntax (% escaped w/ %)
+# sql NOT LIKE syntax
 EXCLUDED_PATTERNS = [
     'http%data.gouv.fr%',
-    'http%example.com%',
+    # opendatasoft shp
+    '%?format=shp%',
 ]
 # max number of _completed_ requests per domain per period
-BACKOFF_NB_REQ = 1800
-BACKOFF_PERIOD = 3600  # in seconds
+BACKOFF_NB_REQ = 180
+BACKOFF_PERIOD = 360  # in seconds
 
 
 async def insert_check(data):
@@ -60,15 +61,16 @@ async def insert_check(data):
 async def is_backoff(domain):
     since = datetime.utcnow() - timedelta(seconds=BACKOFF_PERIOD)
     async with context['pool'].acquire() as connection:
-        res = await connection.fetch('''
+        res = await connection.fetchrow('''
             SELECT COUNT(*) FROM checks
             WHERE domain = $1
             AND created_at >= $2
         ''', domain, since)
-        return res[0]['count'] >= BACKOFF_NB_REQ
+        return res['count'] >= BACKOFF_NB_REQ, res['count']
 
 
 async def check_url(row, session, sleep=0):
+    log.debug(f"check {row['url']}, sleep {sleep}")
 
     if sleep:
         await asyncio.sleep(sleep)
@@ -77,11 +79,17 @@ async def check_url(row, session, sleep=0):
     domain = url_parsed.netloc
     if not domain:
         log.warning(f"[warning] not netloc in url, skipping {row['url']}")
-        return
+        await insert_check({
+            'url': row['url'],
+            'error': 'Not netloc in url',
+            'timeout': False,
+        })
+        return STATUS_ERROR
 
-    if await is_backoff(domain):
-        log.info(f'backoff {domain}')
-        context['monitor'].add_backoff(domain)
+    should_backoff, nb_req = await is_backoff(domain)
+    if should_backoff:
+        log.info(f'backoff {domain} ({nb_req})')
+        context['monitor'].add_backoff(domain, nb_req)
         return await check_url(row, session, sleep=BACKOFF_PERIOD / BACKOFF_NB_REQ)
     else:
         context['monitor'].remove_backoff(domain)
@@ -110,13 +118,20 @@ async def check_url(row, session, sleep=0):
                 'response_time': end - start,
             })
             return STATUS_OK
-    except aiohttp.client_exceptions.ClientError as e:
+    # TODO: debug this one, should be caught in DB now
+    # File "[...]aiohttp/connector.py", line 991, in _create_direct_connection
+    # assert port is not None
+    # TODO: and this one too
+    # for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+    # UnicodeError: encoding with 'idna' codec failed (UnicodeError: label too long)
+    except (aiohttp.client_exceptions.ClientError, AssertionError, UnicodeError) as e:
         await insert_check({
             'url': row['url'],
             'domain': domain,
             'timeout': False,
             'error': str(e)
         })
+        log.error(f"{row['url']}, {e}")
         return STATUS_ERROR
     except asyncio.exceptions.TimeoutError:
         await insert_check({
@@ -139,16 +154,29 @@ async def crawl_urls(to_parse):
             context['monitor'].refresh(results)
 
 
-async def crawl(since='1w'):
-    """Crawl the catalog"""
-    BATCH_SIZE = 100
+async def crawl(**kwargs):
+    try:
+        context['pool'] = await asyncpg.create_pool(dsn=DATABASE_URL, max_size=50)
+        while True:
+            await crawl_batch(**kwargs)
+    finally:
+        if 'pool' in context:
+            print('Closing pool...')
+            await context['pool'].close()
 
-    context['monitor'].init(BATCH_SIZE)
-    context['pool'] = await asyncpg.create_pool(dsn=DATABASE_URL)
 
+def get_excluded_clause():
+    return ' AND '.join([f"catalog.url NOT LIKE '{p}'" for p in EXCLUDED_PATTERNS])
+
+
+async def crawl_batch(since='1w', batch_size=100):
+    """Crawl a batch from the catalog"""
+    context['monitor'].init(
+        BATCH_SIZE=100, BACKOFF_NB_REQ=BACKOFF_NB_REQ, BACKOFF_PERIOD=BACKOFF_PERIOD
+    )
     context['monitor'].set_status('Getting a batch from catalog...')
     async with context['pool'].acquire() as connection:
-        excluded = ' AND '.join([f"catalog.url NOT LIKE '{p}'" for p in EXCLUDED_PATTERNS])
+        excluded = get_excluded_clause()
         # urls without checks first
         q = f'''
             SELECT * FROM (
@@ -156,16 +184,16 @@ async def crawl(since='1w'):
                 FROM catalog
                 WHERE catalog.last_check IS NULL
                 AND {excluded}
+                AND deleted = False
             ) s
-            ORDER BY random() LIMIT {BATCH_SIZE};
+            ORDER BY random() LIMIT {batch_size};
         '''
-        log.info(q)
         to_check = await connection.fetch(q)
         # if not enough for our batch size, handle outdated checks
-        if len(to_check) < BATCH_SIZE:
+        if len(to_check) < batch_size:
             since = parse_timespan(since)  # in seconds
             since = datetime.utcnow() - timedelta(seconds=since)
-            limit = BATCH_SIZE - len(to_check)
+            limit = batch_size - len(to_check)
             q = f'''
             SELECT * FROM (
                 SELECT DISTINCT(catalog.url)
@@ -174,12 +202,17 @@ async def crawl(since='1w'):
                 AND {excluded}
                 AND catalog.last_check = checks.id
                 AND checks.created_at <= $1
+                AND catalog.deleted = False
             ) s
             ORDER BY random() LIMIT {limit};
             '''
             to_check += await connection.fetch(q, since)
 
-    await crawl_urls(to_check)
+    if len(to_check):
+        await crawl_urls(to_check)
+    else:
+        context['monitor'].set_status('Nothing to crawl for now.')
+        await asyncio.sleep(60)
     context['monitor'].set_status('Crawling done.')
 
 
@@ -187,9 +220,6 @@ def run():
     try:
         monitor = Monitor()
         context['monitor'] = monitor
-        # TODO: this will get ugly in memory, only aggregated stuff in results
-        # maybe make it a "global" var, might display if interrupted
-        # use a log file to output complete run (csv? but don't duplicate the DB!)
         asyncio.get_event_loop().run_until_complete(crawl())
         # FIXME: prevents screen from disappearing
         monitor.listen()
