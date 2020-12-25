@@ -1,11 +1,15 @@
 import csv
 import os
+from datetime import datetime, timedelta
 from tempfile import NamedTemporaryFile
 
 import aiohttp
 import asyncpg
 from minicli import cli, run, wrap
+from humanfriendly import parse_timespan
 from progressist import ProgressBar
+
+import config
 
 DATABASE_URL = os.getenv('DATABASE_URL', 'postgres://postgres:postgres@localhost:5432/postgres')
 CATALOG_URL = 'https://www.data.gouv.fr/fr/datasets/r/4babf5f2-6a9c-45b5-9144-ca5eae6a7a6d'
@@ -89,7 +93,6 @@ async def load_catalog(url=CATALOG_URL):
         os.unlink(fd.name)
 
 
-# TODO: account for `SINCE`, not only last_check (2nd query...)
 @cli
 async def summary():
     from tabulate import tabulate
@@ -103,8 +106,32 @@ async def summary():
         AND catalog.deleted = False
     '''
     stats_catalog = await context['conn'].fetchrow(q)
-    total = (stats_catalog['count_left'] + stats_catalog['count_checked'])
-    rate = round(stats_catalog['count_checked'] / total * 100, 1)
+
+    since = parse_timespan(config.SINCE)
+    since = datetime.utcnow() - timedelta(seconds=since)
+    q = f'''
+        SELECT
+            SUM(CASE WHEN checks.created_at <= $1 THEN 1 ELSE 0 END) AS count_outdated
+            --, SUM(CASE WHEN checks.created_at > $1 THEN 1 ELSE 0 END) AS count_fresh
+        FROM catalog, checks
+        WHERE {get_excluded_clause()}
+        AND catalog.last_check = checks.id
+        AND catalog.deleted = False
+    '''
+    stats_checks = await context['conn'].fetchrow(q, since)
+
+    count_left = stats_catalog['count_left'] + stats_checks['count_outdated']
+    # all w/ a check, minus those with an outdated checked
+    count_checked = stats_catalog['count_checked'] - stats_checks['count_outdated']
+    total = stats_catalog['count_left'] + stats_catalog['count_checked']
+    rate_checked = round(stats_catalog['count_checked'] / total * 100, 1)
+    rate_checked_fresh = round(count_checked / total * 100, 1)
+
+    print(tabulate([
+        ['Pending check', count_left],
+        ['Checked (once)', stats_catalog['count_checked'], f"{rate_checked}%"],
+        ['Checked (fresh)', count_checked, f"{rate_checked_fresh}%"],
+    ]))
 
     q = f'''
         SELECT
@@ -116,17 +143,16 @@ async def summary():
         AND catalog.last_check = checks.id
         AND catalog.deleted = False
     '''
-    stats_checks = await context['conn'].fetchrow(q)
+    stats_status = await context['conn'].fetchrow(q)
 
     def cmp_rate(key):
-        return f"{round(stats_checks[key] / stats_catalog['count_checked'] * 100, 1)}%"
+        return f"{round(stats_status[key] / stats_catalog['count_checked'] * 100, 1)}%"
 
+    print()
     print(tabulate([
-        ['Left to check', stats_catalog['count_left']],
-        ['Checked', stats_catalog['count_checked'], f"{rate}%"],
-        ['Errors', stats_checks['count_error'], cmp_rate('count_error')],
-        ['Timeouts', stats_checks['count_timeout'], cmp_rate('count_timeout')],
-        ['Replied', stats_checks['count_ok'], cmp_rate('count_ok')],
+        ['Errors', stats_status['count_error'], cmp_rate('count_error')],
+        ['Timeouts', stats_status['count_timeout'], cmp_rate('count_timeout')],
+        ['Replied', stats_status['count_ok'], cmp_rate('count_ok')],
     ]))
 
     q = '''
