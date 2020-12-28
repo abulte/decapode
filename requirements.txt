@@ -4,3 +4,4 @@ aiohttp
 progressist
 humanfriendly
 tabulate
+marshmallow

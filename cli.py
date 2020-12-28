@@ -72,7 +72,7 @@ async def load_catalog(url=CATALOG_URL):
                         break
                     fd.write(chunk)
         fd.close()
-        print('Creating catalog in database...')
+        print('Upserting catalog in database...')
         # consider everything deleted, deleted will be updated when loading new catalog
         await context['conn'].execute('UPDATE catalog SET deleted = TRUE')
         with open(fd.name) as fd:
