@@ -27,17 +27,19 @@ class CheckSchema(Schema):
     deleted = fields.Boolean()
 
 
-@routes.get("/checks/")
+@routes.get("/checks/latest/")
 async def get_check(request):
     url = request.query.get("url")
-    if not url:
+    resource_id = request.query.get("resource_id")
+    if not url and not resource_id:
         raise web.HTTPBadRequest()
-    q = """
+    column = "url" if url else "resource_id"
+    q = f"""
     SELECT * from checks, catalog
     WHERE checks.id = catalog.last_check
-    AND catalog.url = $1
+    AND catalog.{column} = $1
     """
-    data = await request.app["pool"].fetchrow(q, url)
+    data = await request.app["pool"].fetchrow(q, url or resource_id)
     if not data:
         raise web.HTTPNotFound()
     if data["deleted"]:

@@ -69,10 +69,12 @@ pip install -r requirements.dev.txt
 adev runserver app.py
 ```
 
-### Get a check by url
+### Get latest check
+
+Works with `?url={url}` and `?resource_id={resource_id}`.
 
 ```
-$ curl -s "http://localhost:8000/checks/?url=http://opendata-sig.saintdenis.re/datasets/661e19974bcc48849bbff7c9637c5c28_1.csv" | json_pp
+$ curl -s "http://localhost:8000/checks/latest/?url=http://opendata-sig.saintdenis.re/datasets/661e19974bcc48849bbff7c9637c5c28_1.csv" | json_pp
 {
    "created_at" : "2020-12-24T18:18:19.429045",
    "resource_id" : "b3678c59-5b35-43ad-9379-fce29e5b56fe",
@@ -102,3 +104,9 @@ $ curl -s "http://localhost:8000/checks/?url=http://opendata-sig.saintdenis.re/d
    "dataset_id" : "5c34944606e3e73d4a551889"
 }
 ```
+
+## TODO
+
+- [ ] denormalize interesting headers (length, mimetype, last-modified...)
+- [ ] handle GET requests for some domains
+- [ ] some sort of dashboard (dash?), or just plug postgrest and handle that elsewhere
