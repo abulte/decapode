@@ -107,6 +107,7 @@ $ curl -s "http://localhost:8000/checks/latest/?url=http://opendata-sig.saintden
 
 ## TODO
 
+- [ ] non curse interface :sad:
 - [ ] denormalize interesting headers (length, mimetype, last-modified...)
 - [ ] handle GET requests for some domains
 - [ ] some sort of dashboard (dash?), or just plug postgrest and handle that elsewhere
