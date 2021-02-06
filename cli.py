@@ -59,20 +59,23 @@ async def init_db(drop=False, table=None, index=False):
         ''')
 
 
+async def download_file(url, fd):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            while True:
+                chunk = await resp.content.read(1024)
+                if not chunk:
+                    break
+                fd.write(chunk)
+
+
 @cli
 async def load_catalog(url=CATALOG_URL):
     """Load the catalog into DB from CSV file"""
     try:
         print('Downloading catalog...')
-        fd = NamedTemporaryFile(delete=False)
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                while True:
-                    chunk = await resp.content.read(1024)
-                    if not chunk:
-                        break
-                    fd.write(chunk)
-        fd.close()
+        with NamedTemporaryFile(delete=False) as fd:
+            await download_file(url, fd)
         print('Upserting catalog in database...')
         # consider everything deleted, deleted will be updated when loading new catalog
         await context['conn'].execute('UPDATE catalog SET deleted = TRUE')
@@ -225,17 +228,7 @@ async def csv_sample(size=1000, download=False, max_size='100M'):
         lines.append(line)
         if not download:
             continue
-        async with aiohttp.ClientSession() as session:
-            try:
-                resp = await session.get(r['url'])
-                with filename.open('wb') as fd:
-                    while True:
-                        chunk = await resp.content.read(4096)
-                        if not chunk:
-                            break
-                        fd.write(chunk)
-            except Exception as e:
-                print('ERROR', r['url'], e.__str__())
+        await download_file(r['url'], filename.open('wb'))
         with os.popen(f'file {filename} -b --mime-type') as proc:
             line['magic_mime'] = proc.read().lower().strip()
         line['real_size'] = filename.stat().st_size
