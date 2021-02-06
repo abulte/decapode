@@ -49,12 +49,15 @@ async def insert_check(data):
 
 
 async def is_backoff(domain):
+    no_backoff = [f"'{d}'" for d in config.NO_BACKOFF_DOMAINS]
+    no_backoff = f"({','.join(no_backoff)})"
     since = datetime.utcnow() - timedelta(seconds=config.BACKOFF_PERIOD)
     async with context['pool'].acquire() as connection:
-        res = await connection.fetchrow('''
+        res = await connection.fetchrow(f'''
             SELECT COUNT(*) FROM checks
             WHERE domain = $1
             AND created_at >= $2
+            AND domain NOT IN {no_backoff}
         ''', domain, since)
         return res['count'] >= config.BACKOFF_NB_REQ, res['count']
 
@@ -80,6 +83,8 @@ async def check_url(row, session, sleep=0):
     if should_backoff:
         log.info(f'backoff {domain} ({nb_req})')
         context['monitor'].add_backoff(domain, nb_req)
+        # TODO: maybe just skip this url, it should come back in the next batch anyway
+        # but won't it accumulate too many backoffs in the end? is this a problem?
         return await check_url(row, session,
                                sleep=config.BACKOFF_PERIOD / config.BACKOFF_NB_REQ)
     else:

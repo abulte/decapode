@@ -2,9 +2,16 @@
 
 # sql LIKE syntax
 EXCLUDED_PATTERNS = [
-    'http%data.gouv.fr%',
+    'http%geo.data.gouv.fr%',
     # opendatasoft shp
     '%?format=shp%',
+]
+# no backoff for those domains
+NO_BACKOFF_DOMAINS = [
+    'static.data.gouv.fr',
+    'www.data.gouv.fr',
+    # dead domain, no need to backoff
+    'inspire.data.gouv.fr',
 ]
 # max number of _completed_ requests per domain per period
 BACKOFF_NB_REQ = 180

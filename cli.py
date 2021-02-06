@@ -1,12 +1,13 @@
 import csv
 import os
 from datetime import datetime, timedelta
+from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 import aiohttp
 import asyncpg
 from minicli import cli, run, wrap
-from humanfriendly import parse_timespan
+from humanfriendly import parse_timespan, parse_size
 from progressist import ProgressBar
 
 import config
@@ -164,6 +165,85 @@ async def summary():
     '''
     print()
     print(tabulate(await context['conn'].fetch(q), headers=['HTTP code', 'Count']))
+
+
+@cli
+async def csv_sample(size=1000, download=False, max_size='100M'):
+    """Get a csv sample from latest checks
+
+    :size: Size of the sample (how many files to query)
+    :download: Download files or just list them
+    :max_size: Maximum size for one file (from headers)
+    """
+    max_size = parse_size(max_size)
+    start_q = f'''
+        SELECT catalog.resource_id, catalog.dataset_id, checks.url,
+            checks.headers->>'content-type' as content_type,
+            checks.headers->>'content-length' as content_length
+        FROM checks, catalog
+        WHERE catalog.last_check = checks.id
+        AND checks.headers->>'content-type' LIKE '%csv%'
+        AND checks.status >= 200 and checks.status < 400
+        AND CAST(checks.headers->>'content-length' AS INTEGER) <= {max_size}
+    '''
+    end_q = f'''
+        ORDER BY RANDOM()
+        LIMIT {size / 2}
+    '''
+    # get remote stuff for half the sample
+    q = f'''{start_q}
+        -- ignore ODS, they're correctly formated from a datastore
+        AND checks.url NOT LIKE '%/explore/dataset/%'
+        AND checks.url NOT LIKE '%/api/datasets/1.0/%'
+        -- ignore ours
+        AND checks.domain <> 'static.data.gouv.fr'
+        {end_q}
+    '''
+    res = await context['conn'].fetch(q)
+    # and from us for the rest
+    q = f'''{start_q}
+        AND checks.domain = 'static.data.gouv.fr'
+        {end_q}
+    '''
+    res += await context['conn'].fetch(q)
+
+    data_path = Path('./data')
+    dl_path = data_path / 'downloaded'
+    dl_path.mkdir(exist_ok=True, parents=True)
+    if download:
+        print('Cleaning up...')
+        (data_path / '_index.csv').unlink(missing_ok=True)
+        [p.unlink() for p in Path(dl_path).glob('*.csv')]
+
+    lines = []
+    bar = ProgressBar(total=len(res))
+    for r in bar.iter(res):
+        line = dict(r)
+        line['resource_id'] = str(line['resource_id'])
+        filename = dl_path / f"{r['dataset_id']}_{r['resource_id']}.csv"
+        line['filename'] = filename.__str__()
+        lines.append(line)
+        if not download:
+            continue
+        async with aiohttp.ClientSession() as session:
+            try:
+                resp = await session.get(r['url'])
+                with filename.open('wb') as fd:
+                    while True:
+                        chunk = await resp.content.read(4096)
+                        if not chunk:
+                            break
+                        fd.write(chunk)
+            except Exception as e:
+                print('ERROR', r['url'], e.__str__())
+        with os.popen(f'file {filename} -b --mime-type') as proc:
+            line['magic_mime'] = proc.read().lower().strip()
+        line['real_size'] = filename.stat().st_size
+
+    with (data_path / '_index.csv').open('w') as ofile:
+        writer = csv.DictWriter(ofile, fieldnames=lines[0].keys())
+        writer.writeheader()
+        writer.writerows(lines)
 
 
 @wrap
