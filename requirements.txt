@@ -5,3 +5,4 @@ progressist
 humanfriendly
 tabulate
 marshmallow
+gunicorn
