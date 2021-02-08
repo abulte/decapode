@@ -1,10 +1,12 @@
 import json
 import logging
 import os
+import sys
 import time
 
 from collections import defaultdict
 from datetime import datetime, timedelta
+from unittest.mock import MagicMock
 from urllib.parse import urlparse
 
 import aiohttp
@@ -17,11 +19,6 @@ import config
 from monitor import Monitor
 
 log = logging.getLogger(__name__)
-handler = logging.FileHandler('crawl.log')
-formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
-handler.setFormatter(formatter)
-log.addHandler(handler)
-log.setLevel(logging.DEBUG)
 
 context = {}
 results = defaultdict(int)
@@ -212,9 +209,27 @@ async def crawl(**kwargs):
             await context['pool'].close()
 
 
+def setup_logging(file_handler=False):
+    if file_handler:
+        handler = logging.FileHandler('crawl.log')
+    else:
+        handler = logging.StreamHandler(sys.stdout)
+    formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+    handler.setFormatter(formatter)
+    log.addHandler(handler)
+    log.setLevel(logging.DEBUG)
+
+
 def run():
+    curses_enabled = os.getenv('DECAPODE_CURSES_ENABLED', False) == 'True'
+    setup_logging(curses_enabled)
     try:
-        monitor = Monitor()
+        if curses_enabled:
+            monitor = Monitor()
+        else:
+            monitor = MagicMock()
+            monitor.set_status = lambda x: log.debug(x)
+            monitor.init = lambda **kwargs: log.debug(f'Starting decapode... {kwargs}')
         context['monitor'] = monitor
         asyncio.get_event_loop().run_until_complete(crawl())
     except KeyboardInterrupt:
