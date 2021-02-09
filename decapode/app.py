@@ -15,7 +15,6 @@ routes = web.RouteTableDef()
 
 
 class CheckSchema(Schema):
-    # FIXME: not a check id, but a catalog one
     check_id = fields.Integer(data_key="id")
     catalog_id = fields.Integer()
     url = fields.Str()
@@ -50,7 +49,6 @@ async def get_check(request):
     AND catalog.{column} = $1
     """
     data = await request.app["pool"].fetchrow(q, url or resource_id)
-    print(data)
     if not data:
         raise web.HTTPNotFound()
     if data["deleted"]:

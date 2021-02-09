@@ -10,11 +10,11 @@ URLs are crawled via _aiohttp_, catalog and crawled metadata are stored in a _Po
 
 ### Create database structure
 
-`python cli.py init-db`
+`decapode init-db`
 
 ### Load (UPSERT) latest catalog version from data.gouv.fr
 
-`python cli.py load-catalog`
+`decapode load-catalog`
 
 ### Print summary
 
@@ -48,7 +48,7 @@ Replied        106061  95.1%
 
 ## Crawler
 
-`python crawl.py`
+`decapode-crawl`
 
 It will crawl (forever) the catalog according to config set in `config.py`.
 
@@ -62,7 +62,7 @@ If an URL matches one of the `EXCLUDED_PATTERNS`, it will never be checked.
 
 A curses interface is available via:
 
-`DECAPODE_CURSES_ENABLED=True python crawl.py`
+`DECAPODE_CURSES_ENABLED=True decapode-crawl`
 
 ## API
 
@@ -70,7 +70,7 @@ A curses interface is available via:
 
 ```
 pip install -r requirements.dev.txt
-adev runserver app.py
+adev runserver decapode/app.py
 ```
 
 ### Get latest check

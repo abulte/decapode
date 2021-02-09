@@ -10,9 +10,8 @@ from minicli import cli, run, wrap
 from humanfriendly import parse_timespan, parse_size
 from progressist import ProgressBar
 
-import config
+from decapode import config
 
-DATABASE_URL = os.getenv('DATABASE_URL', 'postgres://postgres:postgres@localhost:5432/postgres')
 CATALOG_URL = 'https://www.data.gouv.fr/fr/datasets/r/4babf5f2-6a9c-45b5-9144-ca5eae6a7a6d'
 
 context = {}
@@ -21,11 +20,12 @@ context = {}
 @cli
 async def init_db(drop=False, table=None, index=False, reindex=False):
     """Create the DB structure"""
+    print('Initializing database...')
     if drop:
         if table == 'catalog' or not table:
-            await context['conn'].execute('DROP TABLE catalog')
+            await context['conn'].execute('DROP TABLE IF EXISTS catalog')
         if table == 'checks' or not table:
-            await context['conn'].execute('DROP TABLE checks')
+            await context['conn'].execute('DROP TABLE IF EXISTS checks')
     await context['conn'].execute('''
         CREATE TABLE IF NOT EXISTS catalog(
             id serial PRIMARY KEY,
@@ -76,7 +76,7 @@ async def download_file(url, fd):
 async def load_catalog(url=CATALOG_URL):
     """Load the catalog into DB from CSV file"""
     try:
-        print('Downloading catalog...')
+        print(f'Downloading catalog from {url}...')
         with NamedTemporaryFile(delete=False) as fd:
             await download_file(url, fd)
         print('Upserting catalog in database...')
@@ -244,7 +244,8 @@ async def csv_sample(size=1000, download=False, max_size='100M'):
 
 @wrap
 async def cli_wrapper():
-    context['conn'] = await asyncpg.connect(dsn=DATABASE_URL)
+    dsn = os.getenv('DATABASE_URL', 'postgres://postgres:postgres@localhost:5432/postgres')
+    context['conn'] = await asyncpg.connect(dsn=dsn)
     yield
     await context['conn'].close()
 

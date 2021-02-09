@@ -15,8 +15,8 @@ import asyncpg
 
 from humanfriendly import parse_timespan
 
-import config
-from monitor import Monitor
+from decapode import config
+from decapode.monitor import Monitor
 
 log = logging.getLogger(__name__)
 
@@ -26,8 +26,6 @@ results = defaultdict(int)
 STATUS_OK = 'ok'
 STATUS_TIMEOUT = 'timeout'
 STATUS_ERROR = 'error'
-
-DATABASE_URL = os.getenv('DATABASE_URL', 'postgres://postgres:postgres@localhost:5432/postgres')
 
 
 async def insert_check(data):
@@ -193,15 +191,21 @@ async def crawl_batch():
         await asyncio.sleep(60)
 
 
-async def crawl(**kwargs):
+async def crawl(iterations=-1):
+    """Launch crawl batches
+
+    :iterations: for testing purposes (break infinite loop)
+    """
     try:
-        context['pool'] = await asyncpg.create_pool(dsn=DATABASE_URL, max_size=50)
+        dsn = os.getenv('DATABASE_URL', 'postgres://postgres:postgres@localhost:5432/postgres')
+        context['pool'] = await asyncpg.create_pool(dsn=dsn, max_size=50)
         context['monitor'].init(
             SINCE=config.SINCE, BATCH_SIZE=config.BATCH_SIZE,
             BACKOFF_NB_REQ=config.BACKOFF_NB_REQ, BACKOFF_PERIOD=config.BACKOFF_PERIOD
         )
-        while True:
-            await crawl_batch(**kwargs)
+        while iterations != 0:
+            await crawl_batch()
+            iterations -= 1
     finally:
         if 'pool' in context:
             print('Closing pool...')
@@ -219,7 +223,11 @@ def setup_logging(file_handler=False):
     log.setLevel(logging.DEBUG)
 
 
-def run():
+def run(iterations=-1):
+    """Main function
+
+    :iterations: for testing purposes (break infinite loop)
+    """
     curses_enabled = os.getenv('DECAPODE_CURSES_ENABLED', False) == 'True'
     setup_logging(curses_enabled)
     try:
@@ -230,7 +238,7 @@ def run():
             monitor.set_status = lambda x: log.debug(x)
             monitor.init = lambda **kwargs: log.debug(f'Starting decapode... {kwargs}')
         context['monitor'] = monitor
-        asyncio.get_event_loop().run_until_complete(crawl())
+        asyncio.get_event_loop().run_until_complete(crawl(iterations))
     except KeyboardInterrupt:
         pass
     finally:

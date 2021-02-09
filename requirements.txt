@@ -1,8 +1,1 @@
-minicli
-asyncpg
-aiohttp
-progressist
-humanfriendly
-tabulate
-marshmallow
-gunicorn
+decapode
