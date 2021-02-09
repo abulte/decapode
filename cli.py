@@ -19,7 +19,7 @@ context = {}
 
 
 @cli
-async def init_db(drop=False, table=None, index=False):
+async def init_db(drop=False, table=None, index=False, reindex=False):
     """Create the DB structure"""
     if drop:
         if table == 'catalog' or not table:
@@ -50,12 +50,15 @@ async def init_db(drop=False, table=None, index=False):
             error VARCHAR
         )
     ''')
-    if index:
+    if reindex:
         await context['conn'].execute('''
             DROP INDEX IF EXISTS url_idx;
-            CREATE INDEX url_idx ON checks (url);
             DROP INDEX IF EXISTS domain_idx;
-            CREATE INDEX domain_idx ON checks (domain);
+        ''')
+    if index or reindex:
+        await context['conn'].execute('''
+            CREATE INDEX IF NOT EXISTS url_idx ON checks (url);
+            CREATE INDEX IF NOT EXISTS domain_idx ON checks (domain);
         ''')
 
 

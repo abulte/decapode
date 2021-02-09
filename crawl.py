@@ -152,10 +152,6 @@ def get_excluded_clause():
 
 async def crawl_batch():
     """Crawl a batch from the catalog"""
-    context['monitor'].init(
-        SINCE=config.SINCE, BATCH_SIZE=config.BATCH_SIZE,
-        BACKOFF_NB_REQ=config.BACKOFF_NB_REQ, BACKOFF_PERIOD=config.BACKOFF_PERIOD
-    )
     context['monitor'].set_status('Getting a batch from catalog...')
     async with context['pool'].acquire() as connection:
         excluded = get_excluded_clause()
@@ -195,12 +191,15 @@ async def crawl_batch():
     else:
         context['monitor'].set_status('Nothing to crawl for now.')
         await asyncio.sleep(60)
-    context['monitor'].set_status('Crawling done.')
 
 
 async def crawl(**kwargs):
     try:
         context['pool'] = await asyncpg.create_pool(dsn=DATABASE_URL, max_size=50)
+        context['monitor'].init(
+            SINCE=config.SINCE, BATCH_SIZE=config.BATCH_SIZE,
+            BACKOFF_NB_REQ=config.BACKOFF_NB_REQ, BACKOFF_PERIOD=config.BACKOFF_PERIOD
+        )
         while True:
             await crawl_batch(**kwargs)
     finally:
