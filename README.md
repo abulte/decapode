@@ -153,6 +153,8 @@ $ curl -s "http://localhost:8000/checks/all/?url=http://www.drees.sante.gouv.fr/
 ## TODO
 
 - [x] non curse interface :sad:
+- [ ] tests
+- [ ] expose summary/status as API
 - [ ] denormalize interesting headers (length, mimetype, last-modified...)
 - [ ] handle GET requests for some domains
 - [ ] some sort of dashboard (dash?), or just plug postgrest and handle that elsewhere

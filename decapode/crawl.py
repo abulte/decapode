@@ -6,21 +6,18 @@ import time
 
 from collections import defaultdict
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock
 from urllib.parse import urlparse
 
 import aiohttp
 import asyncio
-import asyncpg
 
 from humanfriendly import parse_timespan
 
 from decapode import config
-from decapode.monitor import Monitor
+from decapode import context
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("decapode")
 
-context = {}
 results = defaultdict(int)
 
 STATUS_OK = 'ok'
@@ -37,7 +34,8 @@ async def insert_check(data):
         VALUES ({placeholders})
         RETURNING id
     '''
-    async with context['pool'].acquire() as connection:
+    pool = await context.pool()
+    async with pool.acquire() as connection:
         last_check = await connection.fetchrow(q, *data.values())
         q = '''UPDATE catalog SET last_check = $1 WHERE url = $2'''
         await connection.execute(q, last_check['id'], data['url'])
@@ -47,7 +45,8 @@ async def is_backoff(domain):
     no_backoff = [f"'{d}'" for d in config.NO_BACKOFF_DOMAINS]
     no_backoff = f"({','.join(no_backoff)})"
     since = datetime.utcnow() - timedelta(seconds=config.BACKOFF_PERIOD)
-    async with context['pool'].acquire() as connection:
+    pool = await context.pool()
+    async with pool.acquire() as connection:
         res = await connection.fetchrow(f'''
             SELECT COUNT(*) FROM checks
             WHERE domain = $1
@@ -77,13 +76,13 @@ async def check_url(row, session, sleep=0):
     should_backoff, nb_req = await is_backoff(domain)
     if should_backoff:
         log.info(f'backoff {domain} ({nb_req})')
-        context['monitor'].add_backoff(domain, nb_req)
+        context.monitor().add_backoff(domain, nb_req)
         # TODO: maybe just skip this url, it should come back in the next batch anyway
         # but won't it accumulate too many backoffs in the end? is this a problem?
         return await check_url(row, session,
                                sleep=config.BACKOFF_PERIOD / config.BACKOFF_NB_REQ)
     else:
-        context['monitor'].remove_backoff(domain)
+        context.monitor().remove_backoff(domain)
 
     try:
         start = time.time()
@@ -133,7 +132,7 @@ async def check_url(row, session, sleep=0):
 
 
 async def crawl_urls(to_parse):
-    context['monitor'].set_status('Crawling urls...')
+    context.monitor().set_status('Crawling urls...')
     tasks = []
     async with aiohttp.ClientSession(timeout=None) as session:
         for row in to_parse:
@@ -141,7 +140,7 @@ async def crawl_urls(to_parse):
         for task in asyncio.as_completed(tasks):
             result = await task
             results[result] += 1
-            context['monitor'].refresh(results)
+            context.monitor().refresh(results)
 
 
 def get_excluded_clause():
@@ -150,8 +149,9 @@ def get_excluded_clause():
 
 async def crawl_batch():
     """Crawl a batch from the catalog"""
-    context['monitor'].set_status('Getting a batch from catalog...')
-    async with context['pool'].acquire() as connection:
+    context.monitor().set_status('Getting a batch from catalog...')
+    pool = await context.pool()
+    async with pool.acquire() as connection:
         excluded = get_excluded_clause()
         # urls without checks first
         q = f'''
@@ -187,7 +187,7 @@ async def crawl_batch():
     if len(to_check):
         await crawl_urls(to_check)
     else:
-        context['monitor'].set_status('Nothing to crawl for now.')
+        context.monitor().set_status('Nothing to crawl for now.')
         await asyncio.sleep(60)
 
 
@@ -197,9 +197,7 @@ async def crawl(iterations=-1):
     :iterations: for testing purposes (break infinite loop)
     """
     try:
-        dsn = os.getenv('DATABASE_URL', 'postgres://postgres:postgres@localhost:5432/postgres')
-        context['pool'] = await asyncpg.create_pool(dsn=dsn, max_size=50)
-        context['monitor'].init(
+        context.monitor().init(
             SINCE=config.SINCE, BATCH_SIZE=config.BATCH_SIZE,
             BACKOFF_NB_REQ=config.BACKOFF_NB_REQ, BACKOFF_PERIOD=config.BACKOFF_PERIOD
         )
@@ -207,12 +205,12 @@ async def crawl(iterations=-1):
             await crawl_batch()
             iterations -= 1
     finally:
-        if 'pool' in context:
-            print('Closing pool...')
-            await context['pool'].close()
+        pool = await context.pool()
+        await pool.close()
 
 
-def setup_logging(file_handler=False):
+def setup_logging():
+    file_handler = os.getenv('DECAPODE_CURSES_ENABLED', False) == 'True'
     if file_handler:
         handler = logging.FileHandler('crawl.log')
     else:
@@ -223,27 +221,18 @@ def setup_logging(file_handler=False):
     log.setLevel(logging.DEBUG)
 
 
-def run(iterations=-1):
+def run():
     """Main function
 
     :iterations: for testing purposes (break infinite loop)
     """
-    curses_enabled = os.getenv('DECAPODE_CURSES_ENABLED', False) == 'True'
-    setup_logging(curses_enabled)
+    setup_logging()
     try:
-        if curses_enabled:
-            monitor = Monitor()
-        else:
-            monitor = MagicMock()
-            monitor.set_status = lambda x: log.debug(x)
-            monitor.init = lambda **kwargs: log.debug(f'Starting decapode... {kwargs}')
-        context['monitor'] = monitor
-        asyncio.get_event_loop().run_until_complete(crawl(iterations))
+        asyncio.get_event_loop().run_until_complete(crawl())
     except KeyboardInterrupt:
         pass
     finally:
-        if 'monitor' in locals():
-            monitor.teardown()
+        context.monitor().teardown()
 
 
 if __name__ == "__main__":
