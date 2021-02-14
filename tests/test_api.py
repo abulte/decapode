@@ -29,7 +29,7 @@ async def fake_check(status=200, error=None, timeout=False):
 @pytest.mark.parametrize("query", [
     "url=https://example.com/resource-1", "resource_id=c4e3a9fb-4415-488e-ba57-d05269b27adf"
 ])
-async def test_api_latest(query):
+async def test_api_latest(setup_catalog, query):
     await fake_check()
     app = await app_factory()
     async with TestClient(TestServer(app)) as client:
