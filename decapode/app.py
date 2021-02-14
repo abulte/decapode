@@ -1,16 +1,13 @@
 import json
 import logging
-import os
-
-import asyncpg
 
 from aiohttp import web
 from marshmallow import Schema, fields
 
-DATABASE_URL = os.getenv('DATABASE_URL', 'postgres://postgres:postgres@localhost:5432/postgres')
+from decapode import context
+
 
 log = logging.getLogger('aiohttp.access')
-
 routes = web.RouteTableDef()
 
 
@@ -75,7 +72,7 @@ async def get_checks(request):
 
 async def app_factory():
     async def app_startup(app):
-        app["pool"] = await asyncpg.create_pool(dsn=DATABASE_URL)
+        app["pool"] = await context.pool()
 
     async def app_cleanup(app):
         if "pool" in app:
