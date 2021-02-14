@@ -15,7 +15,7 @@ DATABASE_URL = "postgres://postgres:postgres@localhost:5433/postgres"
 pytestmark = pytest.mark.asyncio
 
 
-# this really really really should run first
+# this really really really should run first (or "prod" db will get erased)
 @pytest.fixture(autouse=True, scope="session")
 def setup():
     with mock.patch.dict(os.environ, {"DATABASE_URL": DATABASE_URL}):

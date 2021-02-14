@@ -26,6 +26,8 @@ STATUS_ERROR = 'error'
 
 
 async def insert_check(data):
+    if 'headers' in data:
+        data['headers'] = json.dumps(data['headers'])
     columns = ','.join(data.keys())
     # $1, $2...
     placeholders = ','.join([f'${x + 1}' for x in range(len(data.values()))])
@@ -54,6 +56,24 @@ async def is_backoff(domain):
             AND domain NOT IN {no_backoff}
         ''', domain, since)
         return res['count'] >= config.BACKOFF_NB_REQ, res['count']
+
+
+def convert_headers(headers):
+    """
+    Convert headers from CIMultiDict to dict
+
+    :warning: this will only take the first value for a given header
+    key but multidict is not json serializable
+    """
+    _headers = {}
+    for k in headers.keys():
+        # FIX Unicode low surrogate must follow a high surrogate.
+        # eg in 'TREMI_2017-R\xe9sultats enqu\xeate bruts.csv'
+        value = headers[k]\
+                .encode('utf-8', 'surrogateescape')\
+                .decode('utf-8', 'replace')
+        _headers[k.lower()] = value
+    return _headers
 
 
 async def check_url(row, session, sleep=0):
@@ -89,21 +109,12 @@ async def check_url(row, session, sleep=0):
         timeout = aiohttp.ClientTimeout(total=5)
         async with session.head(row['url'], timeout=timeout, allow_redirects=True) as resp:
             end = time.time()
-            # /!\ this will only take the first value for a given header key
-            # but multidict is not json serializable
-            headers = {}
-            for k in resp.headers.keys():
-                # FIX Unicode low surrogate must follow a high surrogate.
-                # eg in 'TREMI_2017-R\xe9sultats enqu\xeate bruts.csv'
-                value = resp.headers[k]\
-                        .encode('utf-8', 'surrogateescape')\
-                        .decode('utf-8', 'replace')
-                headers[k.lower()] = value
+            resp.raise_for_status()
             await insert_check({
                 'url': row['url'],
                 'domain': domain,
                 'status': resp.status,
-                'headers': json.dumps(headers),
+                'headers': convert_headers(resp.headers),
                 'timeout': False,
                 'response_time': end - start,
             })
@@ -118,7 +129,9 @@ async def check_url(row, session, sleep=0):
             'url': row['url'],
             'domain': domain,
             'timeout': False,
-            'error': str(e)
+            'error': getattr(e, 'message', None) or str(e),
+            'headers': convert_headers(getattr(e, 'headers', {})),
+            'status': getattr(e, 'status', None),
         })
         log.error(f"{row['url']}, {e}")
         return STATUS_ERROR

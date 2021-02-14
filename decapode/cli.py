@@ -103,7 +103,7 @@ async def load_catalog(url=CATALOG_URL):
 @cli
 async def summary():
     from tabulate import tabulate
-    from crawl import get_excluded_clause
+    from decapode.crawl import get_excluded_clause
     q = f'''
         SELECT
             SUM(CASE WHEN last_check IS NULL THEN 1 ELSE 0 END) AS count_left,
