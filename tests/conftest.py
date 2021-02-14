@@ -46,7 +46,8 @@ def setup_catalog(catalog_content, rmock):
 
 @pytest.fixture
 def rmock():
-    with aioresponses() as m:
+    # passthrough for local requests (aiohttp TestServer)
+    with aioresponses(passthrough=["http://127.0.0.1"]) as m:
         yield m
 
 
