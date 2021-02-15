@@ -20,3 +20,5 @@ BACKOFF_PERIOD = 360  # in seconds
 BATCH_SIZE = 100
 # crawl url if last check is older than
 SINCE = '1w'
+# seconds to wait for between batches
+SLEEP_BETWEEN_BATCHES = 60

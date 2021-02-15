@@ -6,22 +6,9 @@ import pytest
 
 from aiohttp.test_utils import TestClient, TestServer
 
-from decapode.crawl import insert_check
 from decapode.app import app_factory
 
 pytestmark = pytest.mark.asyncio
-
-
-async def fake_check(status=200, error=None, timeout=False):
-    await insert_check({
-        "url": "https://example.com/resource-1",
-        "domain": "example.com",
-        "status": status,
-        "headers": {"x-do": "you"},
-        "timeout": timeout,
-        "response_time": 0.1,
-        "error": error,
-    })
 
 
 @pytest.fixture
@@ -34,7 +21,7 @@ async def client():
 @pytest.mark.parametrize("query", [
     "url=https://example.com/resource-1", "resource_id=c4e3a9fb-4415-488e-ba57-d05269b27adf"
 ])
-async def test_api_latest(setup_catalog, query, client):
+async def test_api_latest(setup_catalog, query, client, fake_check):
     await fake_check()
     resp = await client.get(f"/checks/latest/?{query}")
     assert resp.status == 200
@@ -61,7 +48,7 @@ async def test_api_latest(setup_catalog, query, client):
 @pytest.mark.parametrize("query", [
     "url=https://example.com/resource-1", "resource_id=c4e3a9fb-4415-488e-ba57-d05269b27adf"
 ])
-async def test_api_all(setup_catalog, query, client):
+async def test_api_all(setup_catalog, query, client, fake_check):
     await fake_check(status=500, error="no-can-do")
     await fake_check()
     resp = await client.get(f"/checks/all/?{query}")
@@ -74,7 +61,7 @@ async def test_api_all(setup_catalog, query, client):
     assert second["error"] == "no-can-do"
 
 
-async def test_api_status(setup_catalog, client):
+async def test_api_status(setup_catalog, client, fake_check):
     resp = await client.get("/status/")
     assert resp.status == 200
     data = await resp.json()
@@ -99,7 +86,7 @@ async def test_api_status(setup_catalog, client):
     }
 
 
-async def test_api_stats(setup_catalog, client):
+async def test_api_stats(setup_catalog, client, fake_check):
     resp = await client.get("/stats/")
     assert resp.status == 200
     data = await resp.json()

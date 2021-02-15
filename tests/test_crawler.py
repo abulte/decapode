@@ -1,4 +1,6 @@
+from datetime import datetime, timedelta
 import json
+from unittest.mock import MagicMock
 import pytest
 
 import nest_asyncio
@@ -46,7 +48,7 @@ async def test_crawl(setup_catalog, rmock, event_loop, db, resource):
     )
     event_loop.run_until_complete(crawl(iterations=1))
     assert ('HEAD', URL(rurl)) in rmock.requests
-    res = await db.fetchrow("SELECT * FROM checks")
+    res = await db.fetchrow("SELECT * FROM checks WHERE url = $1", rurl)
     assert res["url"] == rurl
     assert res["status"] == status
     if not exception:
@@ -65,6 +67,59 @@ async def test_crawl(setup_catalog, rmock, event_loop, db, resource):
         assert not res["error"]
 
 
-# TODO:
-# - test backoff
-# - test excluded clause
+async def test_backoff(setup_catalog, event_loop, rmock, mocker, fake_check):
+    setup_logging()
+    await fake_check(resource=2)
+    mocker.patch("decapode.config.BACKOFF_NB_REQ", 1)
+    mocker.patch("decapode.config.BACKOFF_PERIOD", 0.25)
+    magic = MagicMock()
+    mocker.patch("decapode.context.monitor").return_value = magic
+    rurl = "https://example.com/resource-1"
+    rmock.head(rurl, status=200)
+    event_loop.run_until_complete(crawl(iterations=1))
+    # verify that we actually backed-off
+    assert magic.add_backoff.called
+
+
+async def test_no_backoff_domains(setup_catalog, event_loop, rmock, mocker, fake_check):
+    setup_logging()
+    await fake_check(resource=2)
+    mocker.patch("decapode.config.BACKOFF_NB_REQ", 1)
+    mocker.patch("decapode.config.NO_BACKOFF_DOMAINS", ["example.com"])
+    magic = MagicMock()
+    mocker.patch("decapode.context.monitor").return_value = magic
+    rurl = "https://example.com/resource-1"
+    rmock.head(rurl, status=200)
+    event_loop.run_until_complete(crawl(iterations=1))
+    # verify that we actually did not back-off
+    assert not magic.add_backoff.called
+
+
+async def test_excluded_clause(setup_catalog, mocker, event_loop, rmock):
+    setup_logging()
+    mocker.patch("decapode.config.SLEEP_BETWEEN_BATCHES", 0)
+    mocker.patch("decapode.config.EXCLUDED_PATTERNS", ["http%example%"])
+    rurl = "https://example.com/resource-1"
+    rmock.head(rurl, status=200)
+    event_loop.run_until_complete(crawl(iterations=1))
+    # url has not been called due to excluded clause
+    assert ('HEAD', URL(rurl)) not in rmock.requests
+
+
+async def test_outdated_check(setup_catalog, rmock, fake_check, event_loop):
+    await fake_check(created_at=datetime.now() - timedelta(weeks=52))
+    rurl = "https://example.com/resource-1"
+    rmock.head(rurl, status=200)
+    event_loop.run_until_complete(crawl(iterations=1))
+    # url has been called because check is outdated
+    assert ('HEAD', URL(rurl)) in rmock.requests
+
+
+async def test_not_outdated_check(setup_catalog, rmock, fake_check, event_loop, mocker):
+    mocker.patch("decapode.config.SLEEP_BETWEEN_BATCHES", 0)
+    await fake_check()
+    rurl = "https://example.com/resource-1"
+    rmock.head(rurl, status=200)
+    event_loop.run_until_complete(crawl(iterations=1))
+    # url has been called because check is fresh
+    assert ('HEAD', URL(rurl)) not in rmock.requests

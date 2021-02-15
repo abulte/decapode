@@ -41,6 +41,7 @@ async def insert_check(data):
         last_check = await connection.fetchrow(q, *data.values())
         q = '''UPDATE catalog SET last_check = $1 WHERE url = $2'''
         await connection.execute(q, last_check['id'], data['url'])
+    return last_check['id']
 
 
 async def is_backoff(domain):
@@ -201,7 +202,7 @@ async def crawl_batch():
         await crawl_urls(to_check)
     else:
         context.monitor().set_status('Nothing to crawl for now.')
-        await asyncio.sleep(60)
+        await asyncio.sleep(config.SLEEP_BETWEEN_BATCHES)
 
 
 async def crawl(iterations=-1):

@@ -9,9 +9,9 @@ import pytest
 from minicli import run
 
 import decapode.cli  # noqa - this register the cli cmds
+from decapode.crawl import insert_check
 
 DATABASE_URL = "postgres://postgres:postgres@localhost:5433/postgres"
-
 pytestmark = pytest.mark.asyncio
 
 
@@ -56,3 +56,26 @@ async def db():
     conn = await asyncpg.connect(dsn=DATABASE_URL)
     yield conn
     await conn.close()
+
+
+@pytest.fixture
+async def fake_check(db):
+
+    async def _fake_check(status=200, error=None, timeout=False, resource=1, created_at=None):
+        id = await insert_check({
+            "url": f"https://example.com/resource-{resource}",
+            "domain": "example.com",
+            "status": status,
+            "headers": {"x-do": "you"},
+            "timeout": timeout,
+            "response_time": 0.1,
+            "error": error,
+        })
+        if created_at:
+            await db.execute("""
+                UPDATE checks
+                SET created_at = $1
+                WHERE id = $2
+            """, created_at, id)
+
+    return _fake_check
