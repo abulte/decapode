@@ -59,6 +59,14 @@ async def is_backoff(domain):
         return res['count'] >= config.BACKOFF_NB_REQ, res['count']
 
 
+def fix_surrogates(value):
+    """FIX Unicode low surrogate must follow a high surrogate.
+    eg in 'TREMI_2017-R\xe9sultats enqu\xeate bruts.csv'
+    """
+    return value.encode('utf-8', 'surrogateescape')\
+                .decode('utf-8', 'replace')
+
+
 def convert_headers(headers):
     """
     Convert headers from CIMultiDict to dict
@@ -66,13 +74,11 @@ def convert_headers(headers):
     :warning: this will only take the first value for a given header
     key but multidict is not json serializable
     """
+    if not headers:
+        return {}
     _headers = {}
     for k in headers.keys():
-        # FIX Unicode low surrogate must follow a high surrogate.
-        # eg in 'TREMI_2017-R\xe9sultats enqu\xeate bruts.csv'
-        value = headers[k]\
-                .encode('utf-8', 'surrogateescape')\
-                .decode('utf-8', 'replace')
+        value = fix_surrogates(headers[k])
         _headers[k.lower()] = value
     return _headers
 
@@ -132,11 +138,12 @@ async def check_url(row, session, sleep=0, method='head'):
     # UnicodeError: encoding with 'idna' codec failed (UnicodeError: label too long)
     # eg http://%20Localisation%20des%20acc%C3%A8s%20des%20offices%20de%20tourisme
     except (aiohttp.client_exceptions.ClientError, AssertionError, UnicodeError) as e:
+        error = getattr(e, 'message', None) or str(e)
         await insert_check({
             'url': row['url'],
             'domain': domain,
             'timeout': False,
-            'error': getattr(e, 'message', None) or str(e),
+            'error': fix_surrogates(error),
             'headers': convert_headers(getattr(e, 'headers', {})),
             'status': getattr(e, 'status', None),
         })
