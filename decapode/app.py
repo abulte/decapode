@@ -1,10 +1,14 @@
 import json
 import logging
 
+from datetime import datetime, timedelta
+
 from aiohttp import web
+from humanfriendly import parse_timespan
 from marshmallow import Schema, fields
 
-from decapode import context
+from decapode import context, config
+from decapode.crawl import get_excluded_clause
 
 
 log = logging.getLogger('aiohttp.access')
@@ -68,6 +72,105 @@ async def get_checks(request):
     if not data:
         raise web.HTTPNotFound()
     return web.json_response([CheckSchema().dump(dict(r)) for r in data])
+
+
+@routes.get("/status/")
+async def status(request):
+    q = f"""
+        SELECT
+            SUM(CASE WHEN last_check IS NULL THEN 1 ELSE 0 END) AS count_left,
+            SUM(CASE WHEN last_check IS NOT NULL THEN 1 ELSE 0 END) AS count_checked
+        FROM catalog
+        WHERE {get_excluded_clause()}
+        AND catalog.deleted = False
+    """
+    stats_catalog = await request.app["pool"].fetchrow(q)
+
+    since = parse_timespan(config.SINCE)
+    since = datetime.utcnow() - timedelta(seconds=since)
+    q = f"""
+        SELECT
+            SUM(CASE WHEN checks.created_at <= $1 THEN 1 ELSE 0 END) AS count_outdated
+            --, SUM(CASE WHEN checks.created_at > $1 THEN 1 ELSE 0 END) AS count_fresh
+        FROM catalog, checks
+        WHERE {get_excluded_clause()}
+        AND catalog.last_check = checks.id
+        AND catalog.deleted = False
+    """
+    stats_checks = await request.app["pool"].fetchrow(q, since)
+
+    count_left = stats_catalog["count_left"] + (stats_checks["count_outdated"] or 0)
+    # all w/ a check, minus those with an outdated checked
+    count_checked = stats_catalog["count_checked"] - (stats_checks["count_outdated"] or 0)
+    total = stats_catalog["count_left"] + stats_catalog["count_checked"]
+    rate_checked = round(stats_catalog["count_checked"] / total * 100, 1)
+    rate_checked_fresh = round(count_checked / total * 100, 1)
+
+    return web.json_response({
+        "total": total,
+        "pending_checks": count_left,
+        "fresh_checks": count_checked,
+        "checks_percentage": rate_checked,
+        "fresh_checks_percentage": rate_checked_fresh,
+    })
+
+
+@routes.get("/stats/")
+async def stats(request):
+    q = f"""
+        SELECT count(*) AS count_checked
+        FROM catalog
+        WHERE {get_excluded_clause()}
+        AND last_check IS NOT NULL
+        AND catalog.deleted = False
+    """
+    stats_catalog = await request.app["pool"].fetchrow(q)
+
+    q = f"""
+        SELECT
+            SUM(CASE WHEN error IS NULL AND timeout = False THEN 1 ELSE 0 END) AS count_ok,
+            SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) AS count_error,
+            SUM(CASE WHEN timeout = True THEN 1 ELSE 0 END) AS count_timeout
+        FROM catalog, checks
+        WHERE {get_excluded_clause()}
+        AND catalog.last_check = checks.id
+        AND catalog.deleted = False
+    """
+    stats_status = await request.app["pool"].fetchrow(q)
+
+    def cmp_rate(key):
+        if stats_catalog["count_checked"] == 0:
+            return 0
+        return round(stats_status[key] / stats_catalog["count_checked"] * 100, 1)
+
+    q = f"""
+        SELECT status, count(*) as count FROM checks, catalog
+        WHERE catalog.last_check = checks.id
+        AND status IS NOT NULL
+        AND {get_excluded_clause()}
+        AND last_check IS NOT NULL
+        AND catalog.deleted = False
+        GROUP BY status
+        ORDER BY count DESC;
+    """
+    res = await request.app["pool"].fetch(q)
+
+    return web.json_response({
+        "status": sorted([
+            {
+                "label": s,
+                "count": stats_status[f"count_{s}"] or 0,
+                "percentage": cmp_rate(f"count_{s}")
+            } for s in ["error", "timeout", "ok"]
+        ], key=lambda x: x["count"], reverse=True),
+        "status_codes": [
+            {
+                "code": r["status"],
+                "count": r["count"],
+                "percentage": round(r["count"] / sum(r["count"] for r in res) * 100, 1)
+            } for r in res
+        ],
+    })
 
 
 async def app_factory():

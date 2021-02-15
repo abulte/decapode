@@ -72,3 +72,88 @@ async def test_api_all(setup_catalog, query, client):
     assert first["status"] == 200
     assert second["status"] == 500
     assert second["error"] == "no-can-do"
+
+
+async def test_api_status(setup_catalog, client):
+    resp = await client.get("/status/")
+    assert resp.status == 200
+    data = await resp.json()
+    assert data == {
+        "total": 1,
+        "pending_checks": 1,
+        "fresh_checks": 0,
+        "checks_percentage": 0.0,
+        "fresh_checks_percentage": 0.0,
+    }
+
+    await fake_check()
+    resp = await client.get("/status/")
+    assert resp.status == 200
+    data = await resp.json()
+    assert data == {
+        "total": 1,
+        "pending_checks": 0,
+        "fresh_checks": 1,
+        "checks_percentage": 100.0,
+        "fresh_checks_percentage": 100.0,
+    }
+
+
+async def test_api_stats(setup_catalog, client):
+    resp = await client.get("/stats/")
+    assert resp.status == 200
+    data = await resp.json()
+    assert data == {
+        "status": [
+            {
+                "label": "error",
+                "count": 0,
+                "percentage": 0
+            },
+            {
+                "label": "timeout",
+                "count": 0,
+                "percentage": 0
+            },
+            {
+                "label": "ok",
+                "count": 0,
+                "percentage": 0
+            }
+        ],
+        "status_codes": []
+    }
+
+    # only the last one should count
+    await fake_check()
+    await fake_check(timeout=True, status=None)
+    await fake_check(status=500, error="error")
+    resp = await client.get("/stats/")
+    assert resp.status == 200
+    data = await resp.json()
+    assert data == {
+        "status": [
+            {
+                "label": "error",
+                "count": 1,
+                "percentage": 100.0
+            },
+            {
+                "label": "timeout",
+                "count": 0,
+                "percentage": 0
+            },
+            {
+                "label": "ok",
+                "count": 0,
+                "percentage": 0
+            }
+        ],
+        "status_codes": [
+            {
+                "code": 500,
+                "count": 1,
+                "percentage": 100.0
+            }
+        ]
+    }

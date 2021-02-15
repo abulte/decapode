@@ -1,16 +1,14 @@
 import csv
 import os
-from datetime import datetime, timedelta
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 import aiohttp
 import asyncpg
 from minicli import cli, run, wrap
-from humanfriendly import parse_timespan, parse_size
+from humanfriendly import parse_size
 from progressist import ProgressBar
 
-from decapode import config
 
 CATALOG_URL = 'https://www.data.gouv.fr/fr/datasets/r/4babf5f2-6a9c-45b5-9144-ca5eae6a7a6d'
 
@@ -98,79 +96,6 @@ async def load_catalog(url=CATALOG_URL):
     finally:
         fd.close()
         os.unlink(fd.name)
-
-
-@cli
-async def summary():
-    from tabulate import tabulate
-    from decapode.crawl import get_excluded_clause
-    q = f'''
-        SELECT
-            SUM(CASE WHEN last_check IS NULL THEN 1 ELSE 0 END) AS count_left,
-            SUM(CASE WHEN last_check IS NOT NULL THEN 1 ELSE 0 END) AS count_checked
-        FROM catalog
-        WHERE {get_excluded_clause()}
-        AND catalog.deleted = False
-    '''
-    stats_catalog = await context['conn'].fetchrow(q)
-
-    since = parse_timespan(config.SINCE)
-    since = datetime.utcnow() - timedelta(seconds=since)
-    q = f'''
-        SELECT
-            SUM(CASE WHEN checks.created_at <= $1 THEN 1 ELSE 0 END) AS count_outdated
-            --, SUM(CASE WHEN checks.created_at > $1 THEN 1 ELSE 0 END) AS count_fresh
-        FROM catalog, checks
-        WHERE {get_excluded_clause()}
-        AND catalog.last_check = checks.id
-        AND catalog.deleted = False
-    '''
-    stats_checks = await context['conn'].fetchrow(q, since)
-
-    count_left = stats_catalog['count_left'] + stats_checks['count_outdated']
-    # all w/ a check, minus those with an outdated checked
-    count_checked = stats_catalog['count_checked'] - stats_checks['count_outdated']
-    total = stats_catalog['count_left'] + stats_catalog['count_checked']
-    rate_checked = round(stats_catalog['count_checked'] / total * 100, 1)
-    rate_checked_fresh = round(count_checked / total * 100, 1)
-
-    print(tabulate([
-        ['Pending check', count_left],
-        ['Checked (once)', stats_catalog['count_checked'], f"{rate_checked}%"],
-        ['Checked (fresh)', count_checked, f"{rate_checked_fresh}%"],
-    ]))
-
-    q = f'''
-        SELECT
-            SUM(CASE WHEN error IS NULL AND timeout = False THEN 1 ELSE 0 END) AS count_ok,
-            SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) AS count_error,
-            SUM(CASE WHEN timeout = True THEN 1 ELSE 0 END) AS count_timeout
-        FROM catalog, checks
-        WHERE {get_excluded_clause()}
-        AND catalog.last_check = checks.id
-        AND catalog.deleted = False
-    '''
-    stats_status = await context['conn'].fetchrow(q)
-
-    def cmp_rate(key):
-        return f"{round(stats_status[key] / stats_catalog['count_checked'] * 100, 1)}%"
-
-    print()
-    print(tabulate([
-        ['Errors', stats_status['count_error'], cmp_rate('count_error')],
-        ['Timeouts', stats_status['count_timeout'], cmp_rate('count_timeout')],
-        ['Replied', stats_status['count_ok'], cmp_rate('count_ok')],
-    ]))
-
-    q = '''
-        SELECT status, count(*) as count FROM checks, catalog
-        WHERE catalog.last_check = checks.id
-        AND status IS NOT NULL
-        GROUP BY status
-        ORDER BY count DESC;
-    '''
-    print()
-    print(tabulate(await context['conn'].fetch(q), headers=['HTTP code', 'Count']))
 
 
 @cli
