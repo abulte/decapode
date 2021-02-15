@@ -16,36 +16,6 @@ URLs are crawled via _aiohttp_, catalog and crawled metadata are stored in a _Po
 
 `decapode load-catalog`
 
-### Print summary
-
-```
-$ python cli.py summary
--------------  ------  ------
-Left to check       0
-Checked        111482  100.0%
-Errors           4217  3.8%
-Timeouts         1204  1.1%
-Replied        106061  95.1%
--------------  ------  ------
-
-  HTTP code    Count
------------  -------
-        200    88944
-        404    10144
-        500     2913
-        502     2760
-        429      700
-        400      673
-        501      655
-        403      236
-        405       80
-        503       44
-        202       39
-        401       14
-        530        1
-        410        1
-```
-
 ## Crawler
 
 `decapode-crawl`
@@ -150,11 +120,78 @@ $ curl -s "http://localhost:8000/checks/all/?url=http://www.drees.sante.gouv.fr/
 ]
 ```
 
+### Get crawling status
+
+```
+$ curl -s "http://localhost:8000/status/" | json_pp
+{
+   "fresh_checks_percentage" : 0.4,
+   "pending_checks" : 142153,
+   "total" : 142687,
+   "fresh_checks" : 534,
+   "checks_percentage" : 0.4
+}
+```
+
+### Get crawling stats
+
+```
+$ curl -s "http://localhost:8000/stats/" | json_pp
+{
+   "status" : [
+      {
+         "count" : 525,
+         "percentage" : 98.3,
+         "label" : "ok"
+      },
+      {
+         "label" : "error",
+         "percentage" : 1.3,
+         "count" : 7
+      },
+      {
+         "label" : "timeout",
+         "percentage" : 0.4,
+         "count" : 2
+      }
+   ],
+   "status_codes" : [
+      {
+         "code" : 200,
+         "count" : 413,
+         "percentage" : 78.7
+      },
+      {
+         "code" : 501,
+         "percentage" : 12.4,
+         "count" : 65
+      },
+      {
+         "percentage" : 6.1,
+         "count" : 32,
+         "code" : 404
+      },
+      {
+         "code" : 500,
+         "percentage" : 2.7,
+         "count" : 14
+      },
+      {
+         "code" : 502,
+         "count" : 1,
+         "percentage" : 0.2
+      }
+   ]
+}
+```
+
+
 ## TODO
 
 - [x] non curse interface :sad:
 - [x] tests
 - [x] expose summary/status as API
+- [ ] handle `GET` requests for some domains
+- [ ] handle `GET` request when `501` on `HEAD`
 - [ ] denormalize interesting headers (length, mimetype, last-modified...)
-- [ ] handle GET requests for some domains
 - [ ] some sort of dashboard (dash?), or just plug postgrest and handle that elsewhere
