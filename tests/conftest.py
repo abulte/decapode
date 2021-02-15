@@ -61,21 +61,25 @@ async def db():
 @pytest.fixture
 async def fake_check(db):
 
-    async def _fake_check(status=200, error=None, timeout=False, resource=1, created_at=None):
-        id = await insert_check({
+    async def _fake_check(status=200, error=None, timeout=False, resource=1,
+                          created_at=None, headers={"x-do": "you"}):
+        data = {
             "url": f"https://example.com/resource-{resource}",
             "domain": "example.com",
             "status": status,
-            "headers": {"x-do": "you"},
+            "headers": headers,
             "timeout": timeout,
             "response_time": 0.1,
             "error": error,
-        })
+        }
+        id = await insert_check(data)
         if created_at:
+            data["created_at"] = created_at
             await db.execute("""
                 UPDATE checks
                 SET created_at = $1
                 WHERE id = $2
             """, created_at, id)
+        return data
 
     return _fake_check

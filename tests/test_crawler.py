@@ -121,5 +121,5 @@ async def test_not_outdated_check(setup_catalog, rmock, fake_check, event_loop, 
     rurl = "https://example.com/resource-1"
     rmock.head(rurl, status=200)
     event_loop.run_until_complete(crawl(iterations=1))
-    # url has been called because check is fresh
+    # url has not been called because check is fresh
     assert ('HEAD', URL(rurl)) not in rmock.requests
