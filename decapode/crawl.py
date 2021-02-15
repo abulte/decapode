@@ -77,7 +77,7 @@ def convert_headers(headers):
     return _headers
 
 
-async def check_url(row, session, sleep=0):
+async def check_url(row, session, sleep=0, method='head'):
     log.debug(f"check {row['url']}, sleep {sleep}")
 
     if sleep:
@@ -94,6 +94,9 @@ async def check_url(row, session, sleep=0):
         })
         return STATUS_ERROR
 
+    if domain in config.GET_DOMAINS:
+        method = 'get'
+
     should_backoff, nb_req = await is_backoff(domain)
     if should_backoff:
         log.info(f'backoff {domain} ({nb_req})')
@@ -108,8 +111,11 @@ async def check_url(row, session, sleep=0):
     try:
         start = time.time()
         timeout = aiohttp.ClientTimeout(total=5)
-        async with session.head(row['url'], timeout=timeout, allow_redirects=True) as resp:
+        _method = getattr(session, method)
+        async with _method(row['url'], timeout=timeout, allow_redirects=True) as resp:
             end = time.time()
+            if resp.status == 501 and method != 'get':
+                return await check_url(row, session, method='get')
             resp.raise_for_status()
             await insert_check({
                 'url': row['url'],

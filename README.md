@@ -216,7 +216,7 @@ $ curl -s "http://localhost:8000/stats/" | json_pp
 - [x] tests
 - [x] expose summary/status as API
 - [x] change detection API on url / resource
-- [ ] handle `GET` requests for some domains
-- [ ] handle `GET` request when `501` on `HEAD`
+- [x] handle `GET` request when `501` on `HEAD`
+- [x] handle `GET` requests for some domains
 - [ ] denormalize interesting headers (length, mimetype, last-modified...)
 - [ ] some sort of dashboard (dash?), or just plug postgrest and handle that elsewhere

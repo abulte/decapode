@@ -123,3 +123,24 @@ async def test_not_outdated_check(setup_catalog, rmock, fake_check, event_loop, 
     event_loop.run_until_complete(crawl(iterations=1))
     # url has not been called because check is fresh
     assert ('HEAD', URL(rurl)) not in rmock.requests
+
+
+async def test_501_get(setup_catalog, event_loop, rmock):
+    setup_logging()
+    rurl = "https://example.com/resource-1"
+    rmock.head(rurl, status=501)
+    rmock.get(rurl, status=501)
+    event_loop.run_until_complete(crawl(iterations=1))
+    assert ('HEAD', URL(rurl)) in rmock.requests
+    assert ('GET', URL(rurl)) in rmock.requests
+
+
+async def test_get_domains(setup_catalog, event_loop, rmock, mocker):
+    setup_logging()
+    mocker.patch("decapode.config.GET_DOMAINS", ["example.com"])
+    rurl = "https://example.com/resource-1"
+    rmock.head(rurl, status=200)
+    rmock.get(rurl, status=501)
+    event_loop.run_until_complete(crawl(iterations=1))
+    assert ('HEAD', URL(rurl)) not in rmock.requests
+    assert ('GET', URL(rurl)) in rmock.requests
