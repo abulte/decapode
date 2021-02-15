@@ -11,7 +11,7 @@ from minicli import run
 import decapode.cli  # noqa - this register the cli cmds
 from decapode.crawl import insert_check
 
-DATABASE_URL = "postgres://postgres:postgres@localhost:5433/postgres"
+DATABASE_URL = "postgresql://postgres:postgres@localhost:5433/postgres"
 pytestmark = pytest.mark.asyncio
 
 
