@@ -40,7 +40,7 @@ def _get_args(request):
     return url, resource_id
 
 
-@routes.get("/checks/latest/")
+@routes.get("/api/checks/latest/")
 async def get_check(request):
     url, resource_id = _get_args(request)
     column = "url" if url else "resource_id"
@@ -58,7 +58,7 @@ async def get_check(request):
     return web.json_response(CheckSchema().dump(dict(data)))
 
 
-@routes.get("/checks/all/")
+@routes.get("/api/checks/all/")
 async def get_checks(request):
     url, resource_id = _get_args(request)
     column = "url" if url else "resource_id"
@@ -75,7 +75,7 @@ async def get_checks(request):
     return web.json_response([CheckSchema().dump(dict(r)) for r in data])
 
 
-@routes.get("/changed/")
+@routes.get("/api/changed/")
 async def get_changed(request):
     """Detect if a resource has changed
 
@@ -144,7 +144,7 @@ async def get_changed(request):
         raise web.HTTPNoContent(text="")
 
 
-@routes.get("/status/")
+@routes.get("/api/status/")
 async def status(request):
     q = f"""
         SELECT
@@ -185,7 +185,7 @@ async def status(request):
     })
 
 
-@routes.get("/stats/")
+@routes.get("/api/stats/")
 async def stats(request):
     q = f"""
         SELECT count(*) AS count_checked
