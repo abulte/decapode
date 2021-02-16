@@ -1,5 +1,7 @@
 import csv
 import os
+
+from datetime import datetime
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -167,10 +169,36 @@ async def csv_sample(size=1000, download=False, max_size='100M'):
         writer.writerows(lines)
 
 
+@cli
+def report(filepath=""):
+    try:
+        import pandas as pd
+        from pandas_profiling import ProfileReport
+        from sqlalchemy import create_engine
+    except ImportError:
+        raise Exception("Please install decapode[report] deps.")
+
+    name = f"decapode-{datetime.now().isoformat()}.html"
+    print(f"Creating report {name}...")
+    con = create_engine(context["dsn"])
+    sql = """
+        SELECT ca.deleted, ch.domain, ch.status, ch.timeout, ch.response_time, ch.error,
+            ch.headers->>'content-length' as content_length,
+            ch.headers->>'last-modified' as last_modified,
+            ch.headers->>'content-type' as content_type
+        FROM catalog ca, checks ch
+        WHERE ch.id = ca.last_check;
+    """
+    df = pd.read_sql(sql, con)
+    profile = ProfileReport(df, title="Decapode report", config_file="profiling.yml")
+    profile.to_file(filepath or f"reports/{name}")
+
+
 @wrap
 async def cli_wrapper():
     dsn = os.getenv('DATABASE_URL', 'postgres://postgres:postgres@localhost:5432/postgres')
     context['conn'] = await asyncpg.connect(dsn=dsn)
+    context['dsn'] = dsn
     yield
     await context['conn'].close()
 

@@ -1,4 +1,7 @@
-import curses
+try:
+    import curses
+except ImportError:
+    pass
 from collections import defaultdict
 
 

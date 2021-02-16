@@ -16,6 +16,15 @@ URLs are crawled via _aiohttp_, catalog and crawled metadata are stored in a _Po
 
 `decapode load-catalog`
 
+### Generate pandas-profiling report on check results
+
+```
+pip install .[report]
+decapode report
+```
+
+Reports are accessible through the `/reports` route (simple directory listing).
+
 ## Crawler
 
 `decapode-crawl`
@@ -48,7 +57,7 @@ adev runserver decapode/app.py
 Works with `?url={url}` and `?resource_id={resource_id}`.
 
 ```
-$ curl -s "http://localhost:8000/checks/latest/?url=http://opendata-sig.saintdenis.re/datasets/661e19974bcc48849bbff7c9637c5c28_1.csv" | json_pp
+$ curl -s "http://localhost:8000/api/checks/latest/?url=http://opendata-sig.saintdenis.re/datasets/661e19974bcc48849bbff7c9637c5c28_1.csv" | json_pp
 {
    "status" : 200,
    "catalog_id" : 64148,
@@ -85,7 +94,7 @@ $ curl -s "http://localhost:8000/checks/latest/?url=http://opendata-sig.saintden
 Works with `?url={url}` and `?resource_id={resource_id}`.
 
 ```
-$ curl -s "http://localhost:8000/checks/all/?url=http://www.drees.sante.gouv.fr/IMG/xls/er864.xls" | json_pp
+$ curl -s "http://localhost:8000/api/checks/all/?url=http://www.drees.sante.gouv.fr/IMG/xls/er864.xls" | json_pp
 [
    {
       "domain" : "www.drees.sante.gouv.fr",
@@ -129,7 +138,7 @@ This tries to find a modification date for a given resource, by order of priorit
 Works with `?url={url}` and `?resource_id={resource_id}`.
 
 ```
-$ curl -s "http://localhost:8000/changed/?resource_id=f2d3e1ad-4d7d-46fc-91f8-c26f02c1e487" | json_pp
+$ curl -s "http://localhost:8000/api/changed/?resource_id=f2d3e1ad-4d7d-46fc-91f8-c26f02c1e487" | json_pp
 {
    "changed_at" : "2014-09-15T14:51:52",
    "detection" : "last-modified"
@@ -137,7 +146,7 @@ $ curl -s "http://localhost:8000/changed/?resource_id=f2d3e1ad-4d7d-46fc-91f8-c2
 ```
 
 ```
-$ curl -s "http://localhost:8000/changed/?resource_id=f2d3e1ad-4d7d-46fc-91f8-c26f02c1e487" | json_pp
+$ curl -s "http://localhost:8000/api/changed/?resource_id=f2d3e1ad-4d7d-46fc-91f8-c26f02c1e487" | json_pp
 {
    "changed_at" : "2020-09-15T14:51:52",
    "detection" : "content-length"
@@ -147,7 +156,7 @@ $ curl -s "http://localhost:8000/changed/?resource_id=f2d3e1ad-4d7d-46fc-91f8-c2
 ### Get crawling status
 
 ```
-$ curl -s "http://localhost:8000/status/" | json_pp
+$ curl -s "http://localhost:8000/api/status/" | json_pp
 {
    "fresh_checks_percentage" : 0.4,
    "pending_checks" : 142153,
@@ -160,7 +169,7 @@ $ curl -s "http://localhost:8000/status/" | json_pp
 ### Get crawling stats
 
 ```
-$ curl -s "http://localhost:8000/stats/" | json_pp
+$ curl -s "http://localhost:8000/api/stats/" | json_pp
 {
    "status" : [
       {
@@ -219,4 +228,7 @@ $ curl -s "http://localhost:8000/stats/" | json_pp
 - [x] handle `GET` request when `501` on `HEAD`
 - [x] handle `GET` requests for some domains
 - [ ] denormalize interesting headers (length, mimetype, last-modified...)
-- [ ] some sort of dashboard (dash?), or just plug postgrest and handle that elsewhere
+- [x] some sort of dashboard (dash?), or just plug postgrest and handle that elsewhere
+- [x] documentation for report command
+- [x] custom config file for pandas_profiling
+- [x] move API endpoints to /api endpoints

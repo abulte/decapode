@@ -24,7 +24,7 @@ async def client():
 ])
 async def test_api_latest(setup_catalog, query, client, fake_check):
     await fake_check()
-    resp = await client.get(f"/checks/latest/?{query}")
+    resp = await client.get(f"/api/checks/latest/?{query}")
     assert resp.status == 200
     data = await resp.json()
     assert data.pop("created_at")
@@ -52,7 +52,7 @@ async def test_api_latest(setup_catalog, query, client, fake_check):
 async def test_api_all(setup_catalog, query, client, fake_check):
     await fake_check(status=500, error="no-can-do")
     await fake_check()
-    resp = await client.get(f"/checks/all/?{query}")
+    resp = await client.get(f"/api/checks/all/?{query}")
     assert resp.status == 200
     data = await resp.json()
     assert len(data) == 2
@@ -63,7 +63,7 @@ async def test_api_all(setup_catalog, query, client, fake_check):
 
 
 async def test_api_status(setup_catalog, client, fake_check):
-    resp = await client.get("/status/")
+    resp = await client.get("/api/status/")
     assert resp.status == 200
     data = await resp.json()
     assert data == {
@@ -75,7 +75,7 @@ async def test_api_status(setup_catalog, client, fake_check):
     }
 
     await fake_check()
-    resp = await client.get("/status/")
+    resp = await client.get("/api/status/")
     assert resp.status == 200
     data = await resp.json()
     assert data == {
@@ -88,7 +88,7 @@ async def test_api_status(setup_catalog, client, fake_check):
 
 
 async def test_api_stats(setup_catalog, client, fake_check):
-    resp = await client.get("/stats/")
+    resp = await client.get("/api/stats/")
     assert resp.status == 200
     data = await resp.json()
     assert data == {
@@ -116,7 +116,7 @@ async def test_api_stats(setup_catalog, client, fake_check):
     await fake_check()
     await fake_check(timeout=True, status=None)
     await fake_check(status=500, error="error")
-    resp = await client.get("/stats/")
+    resp = await client.get("/api/stats/")
     assert resp.status == 200
     data = await resp.json()
     assert data == {
@@ -152,7 +152,7 @@ async def test_changed_last_modified(setup_catalog, client, fake_check):
         "last-modified": "Wed, 21 Oct 2015 07:28:00 GMT",
         "content-length": 1
     })
-    resp = await client.get(f"/changed/?url={check['url']}")
+    resp = await client.get(f"/api/changed/?url={check['url']}")
     assert resp.status == 200
     assert await resp.json() == {"changed_at": "2015-10-21T07:28:00", "detection": "last-modified"}
 
@@ -161,26 +161,26 @@ async def test_changed_last_modified(setup_catalog, client, fake_check):
         "last-modified": "Wed, 21 Oct 2015 07:28:00 GMT",
         "content-length": 2
     })
-    resp = await client.get(f"/changed/?url={check['url']}")
+    resp = await client.get(f"/api/changed/?url={check['url']}")
     assert resp.status == 200
     assert await resp.json() == {"changed_at": "2015-10-21T07:28:00", "detection": "last-modified"}
 
 
 async def test_changed_no_header(setup_catalog, client, fake_check):
     check = await fake_check(headers={})
-    resp = await client.get(f"/changed/?url={check['url']}")
+    resp = await client.get(f"/api/changed/?url={check['url']}")
     assert resp.status == 204
 
 
 async def test_changed_content_length(setup_catalog, client, fake_check):
     c1 = datetime.now() - timedelta(days=2)
     check = await fake_check(headers={"content-length": 1}, created_at=c1)
-    resp = await client.get(f"/changed/?url={check['url']}")
+    resp = await client.get(f"/api/changed/?url={check['url']}")
     assert resp.status == 204
 
     c2 = datetime.now() - timedelta(days=1)
     check = await fake_check(headers={"content-length": 2}, created_at=c2)
-    resp = await client.get(f"/changed/?url={check['url']}")
+    resp = await client.get(f"/api/changed/?url={check['url']}")
     assert resp.status == 200
     assert await resp.json() == {
         "changed_at": c2.isoformat(),
@@ -189,7 +189,7 @@ async def test_changed_content_length(setup_catalog, client, fake_check):
 
     c3 = datetime.now()
     check = await fake_check(headers={"content-length": 3}, created_at=c3)
-    resp = await client.get(f"/changed/?url={check['url']}")
+    resp = await client.get(f"/api/changed/?url={check['url']}")
     assert resp.status == 200
     assert await resp.json() == {
         "changed_at": c3.isoformat(),
@@ -198,7 +198,7 @@ async def test_changed_content_length(setup_catalog, client, fake_check):
 
     c4 = datetime.now()
     check = await fake_check(headers={"content-length": 3}, created_at=c4)
-    resp = await client.get(f"/changed/?url={check['url']}")
+    resp = await client.get(f"/api/changed/?url={check['url']}")
     assert resp.status == 200
     assert await resp.json() == {
         "changed_at": c3.isoformat(),
@@ -211,5 +211,5 @@ async def test_changed_content_length_unchanged(setup_catalog, client, fake_chec
     check = await fake_check(headers={"content-length": 1}, created_at=c1)
     c2 = datetime.now() - timedelta(days=1)
     check = await fake_check(headers={"content-length": 1}, created_at=c2)
-    resp = await client.get(f"/changed/?url={check['url']}")
+    resp = await client.get(f"/api/changed/?url={check['url']}")
     assert resp.status == 204
