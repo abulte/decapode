@@ -189,7 +189,7 @@ def report(filepath=""):
         FROM catalog ca, checks ch
         WHERE ch.id = ca.last_check;
     """
-    df = pd.read_sql(sql, con)
+    df = pd.read_sql(sql, con, parse_dates=["last_modified"])
     profile = ProfileReport(df, title="Decapode report", config_file="profiling.yml")
     profile.to_file(filepath or f"reports/{name}")
 
