@@ -48,7 +48,7 @@ A curses interface is available via:
 ### Run
 
 ```
-pip install -r requirements.dev.txt
+pip install -r requirements.txt
 adev runserver decapode/app.py
 ```
 
