@@ -189,7 +189,7 @@ html:
 
 # Styling options for the HTML report
     style:
-      theme: None
+      theme: "united"
       logo: ""
       primary_color: "#337ab7"
       full_width: False
