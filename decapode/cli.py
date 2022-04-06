@@ -6,10 +6,13 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 import aiohttp
+import asyncio
 import asyncpg
 from minicli import cli, run, wrap
 from humanfriendly import parse_size
 from progressist import ProgressBar
+
+from decapode.kafka_integration import kafka_check_resource_avalability
 
 
 CATALOG_URL = 'https://www.data.gouv.fr/fr/datasets/r/4babf5f2-6a9c-45b5-9144-ca5eae6a7a6d'
@@ -192,6 +195,11 @@ def report(filepath=""):
     df = pd.read_sql(sql, con, parse_dates=["last_modified"])
     profile = ProfileReport(df, title="Decapode report", config_file="profiling.yml")
     profile.to_file(filepath or f"reports/{name}")
+
+
+@cli
+def run_kafka_integration() -> None:
+    asyncio.run(kafka_check_resource_avalability())
 
 
 @wrap
