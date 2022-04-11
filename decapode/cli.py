@@ -12,7 +12,7 @@ from minicli import cli, run, wrap
 from humanfriendly import parse_size
 from progressist import ProgressBar
 
-from decapode.kafka_integration import kafka_check_resource_avalability
+from decapode.kafka.consumer import consume_kafka_datasets
 
 
 CATALOG_URL = 'https://raw.githubusercontent.com/sixtedemaupeou/datalake/main/fake_catalogue.csv'
@@ -200,7 +200,7 @@ def report(filepath=""):
 
 @cli
 def run_kafka_integration() -> None:
-    asyncio.run(kafka_check_resource_avalability())
+    asyncio.run(consume_kafka_datasets())
 
 
 @wrap

@@ -26,7 +26,7 @@ STATUS_TIMEOUT = 'timeout'
 STATUS_ERROR = 'error'
 
 
-async def insert_check(data):
+async def insert_check(data: dict):
     if 'headers' in data:
         data['headers'] = json.dumps(data['headers'])
     columns = ','.join(data.keys())
@@ -45,7 +45,7 @@ async def insert_check(data):
     return last_check['id']
 
 
-async def update_check_and_catalog(check_data: dict, produce_kafka: bool=True):
+async def update_check_and_catalog(check_data: dict, produce_kafka: bool=True) -> None:
     """Update the catalog and checks tables"""
     context.monitor().set_status('Updating checks and catalog...')
     pool = await context.pool()
@@ -74,11 +74,11 @@ async def update_check_and_catalog(check_data: dict, produce_kafka: bool=True):
                 or check_data['timeout'] != last_check['timeout']):
                 # Send message to Kafka
                 print('Sending message to Kafka...')
-                produce(id=last_check['resource_id'], data=check_data)
+                produce(id=str(last_check['resource_id']), data=check_data)
 
             print('Upating priority...')
             await connection.fetchrow(f'''
-                UPDATE catalog SET priority = FALSE WHERE resource_id = {last_check['resource_id']};
+                UPDATE catalog SET priority = FALSE WHERE resource_id = '{last_check['resource_id']}';
             ''')
 
     await insert_check(check_data)
@@ -138,7 +138,8 @@ async def check_url(row, session, sleep=0, method='head'):
                 'url': row['url'],
                 'error': 'Not netloc in url',
                 'timeout': False,
-            }
+            },
+            produce_kafka=config.ENABLE_KAFKA
         )
         return STATUS_ERROR
 
@@ -233,8 +234,7 @@ async def crawl_batch():
             SELECT * FROM (
                 SELECT DISTINCT(catalog.url)
                 FROM catalog
-                WHERE catalog.last_check IS NULL
-                AND {excluded}
+                WHERE {excluded}
                 AND deleted = False
                 AND priority = True
             ) s
