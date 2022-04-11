@@ -1,4 +1,3 @@
-from typing import Awaitable
 import json
 from kafka import KafkaConsumer
 import logging
