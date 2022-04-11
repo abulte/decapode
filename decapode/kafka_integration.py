@@ -47,8 +47,10 @@ async def kafka_check_resource_avalability() -> Awaitable[None]:
     )
 
     producer = KafkaProducer(bootstrap_servers=KAFKA_URI, value_serializer=lambda v: json.dumps(v).encode('utf-8'), api_version=kafka_api_version)
+    print('created producer')
 
     for message in consumer:
+        print('Received message')
         message_contents = json.loads(message.value)
         dataset_id = message_contents['data']['id']
 
@@ -72,4 +74,5 @@ async def kafka_check_resource_avalability() -> Awaitable[None]:
             # Send message with checks results to Kafka
             outbound_message_data = {'resource_id': resource['id'], 'dataset_id': dataset_id, 'previous_check': latest_check_status, 'new_check': new_check_status}
             log.debug('Sent to Kafka', outbound_message_data)
+            print(outbound_message_data)
             produce(producer, id=resource['id'], data=outbound_message_data)

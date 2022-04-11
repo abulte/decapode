@@ -15,7 +15,7 @@ from progressist import ProgressBar
 from decapode.kafka_integration import kafka_check_resource_avalability
 
 
-CATALOG_URL = 'https://www.data.gouv.fr/fr/datasets/r/4babf5f2-6a9c-45b5-9144-ca5eae6a7a6d'
+CATALOG_URL = 'https://raw.githubusercontent.com/sixtedemaupeou/datalake/main/fake_catalogue.csv'
 
 context = {}
 
@@ -37,6 +37,7 @@ async def init_db(drop=False, table=None, index=False, reindex=False):
             url VARCHAR,
             deleted BOOLEAN NOT NULL,
             last_check INT,
+            priority BOOLEAN NOT NULL,
             UNIQUE(dataset_id, resource_id, url)
         )
     ''')
@@ -91,8 +92,8 @@ async def load_catalog(url=CATALOG_URL):
             bar = ProgressBar(total=len(rows))
             for row in bar.iter(rows):
                 await context['conn'].execute('''
-                    INSERT INTO catalog (dataset_id, resource_id, url, deleted)
-                    VALUES ($1, $2, $3, FALSE)
+                    INSERT INTO catalog (dataset_id, resource_id, url, deleted, priority)
+                    VALUES ($1, $2, $3, FALSE, FALSE)
                     ON CONFLICT (dataset_id, resource_id, url) DO UPDATE SET deleted = FALSE
                 ''', row['dataset.id'], row['id'], row['url'])
         print('Done!')
