@@ -60,26 +60,23 @@ async def update_check_and_catalog(check_data: dict, produce_kafka: bool=True) -
         if len(last_checks) == 0:
             # In case we are doing our first check for given URL
             rows = await connection.fetch(f'''
-                SELECT resource_id FROM catalog WHERE url = '{check_data['url']}';
+                SELECT resource_id, priority, initialization FROM catalog WHERE url = '{check_data['url']}';
             ''')
-            last_checks = [{'resource_id': row[0], 'status': None} for row in rows]
+            last_checks = [{'resource_id': row[0], 'priority': row[1], 'initialization': row[2], 'status': None} for row in rows]
 
         # There could be multiple resources pointing to the same URL
-        print(last_checks)
-        print(check_data)
-        print('###############')
         for last_check in last_checks:
             if produce_kafka and (last_check is None \
                 or ('status' in check_data and check_data['status'] != last_check['status']) or ('status' not in check_data and last_check['status'] is not None) \
                 or check_data['timeout'] != last_check['timeout']):
-                # Send message to Kafka
-                print('Sending message to Kafka...')
-                produce(id=str(last_check['resource_id']), data=check_data)
+                log.debug('Sending message to Kafka...')
+                message_type = 'event-update' if last_check['priority'] else 'initialization' if last_check['initialization'] else 'regular-update'
+                produce(id=str(last_check['resource_id']), data=check_data, message_type=message_type)
 
-            print('Upating priority...')
-            await connection.fetchrow(f'''
-                UPDATE catalog SET priority = FALSE WHERE resource_id = '{last_check['resource_id']}';
-            ''')
+        log.debug('Upating priority...')
+        await connection.execute(f'''
+            UPDATE catalog SET priority = FALSE, initialization = FALSE WHERE url = '{check_data['url']}';
+        ''')
 
     await insert_check(check_data)
 

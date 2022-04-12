@@ -38,6 +38,7 @@ async def init_db(drop=False, table=None, index=False, reindex=False):
             deleted BOOLEAN NOT NULL,
             last_check INT,
             priority BOOLEAN NOT NULL,
+            initialization BOOLEAN NOT NULL DEFAULT FALSE,
             UNIQUE(dataset_id, resource_id, url)
         )
     ''')
@@ -92,8 +93,8 @@ async def load_catalog(url=CATALOG_URL):
             bar = ProgressBar(total=len(rows))
             for row in bar.iter(rows):
                 await context['conn'].execute('''
-                    INSERT INTO catalog (dataset_id, resource_id, url, deleted, priority)
-                    VALUES ($1, $2, $3, FALSE, FALSE)
+                    INSERT INTO catalog (dataset_id, resource_id, url, deleted, priority, initialization)
+                    VALUES ($1, $2, $3, FALSE, FALSE, TRUE)
                     ON CONFLICT (dataset_id, resource_id, url) DO UPDATE SET deleted = FALSE
                 ''', row['dataset.id'], row['id'], row['url'])
         print('Done!')

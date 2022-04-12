@@ -22,7 +22,7 @@ class KafkaProducerSingleton:
         return KafkaProducerSingleton.__instance
 
 
-def produce(id, data: dict):
+def produce(id, data: dict, message_type: str):
     '''
     Produce message with marshalled document.
     kwargs is meant to contain non generic values
@@ -34,7 +34,10 @@ def produce(id, data: dict):
     value = {
         'service': 'decapode',
         'data': data,
+        'meta': {
+            'message_type': message_type
+        }
     }
 
-    producer.send(topic='decapode', value=value, key=key)
+    producer.send(topic='resource-crawler', value=value, key=key)
     producer.flush()
