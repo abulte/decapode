@@ -22,7 +22,7 @@ async def consume_kafka_datasets() -> None:
         group_id=None,
         api_version=kafka_api_version,
         reconnect_backoff_max_ms=100000,  # TODO: what value to set here?
-        auto_offset_reset='smallest' # TODO: Check if it should be removed in prod
+        # auto_offset_reset='smallest' # This line can be added for tests to receive messages from the beginning
     )
 
     log.info('Consuming dataset topic...')
