@@ -2,11 +2,7 @@ import json
 
 from kafka import KafkaProducer
 
-from decapode.config import KAFKA_URI, KAFKA_API_VERSION
-
-
-kafka_api_version = tuple([int(value) for value in KAFKA_API_VERSION.split('.')])
-producer = KafkaProducer(bootstrap_servers=KAFKA_URI, value_serializer=lambda v: json.dumps(v).encode('utf-8'), api_version=kafka_api_version)
+from decapode.config import KAFKA_URI
 
 
 class KafkaProducerSingleton:

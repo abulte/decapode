@@ -45,7 +45,7 @@ async def insert_check(data: dict):
     return last_check['id']
 
 
-async def update_check_and_catalog(check_data: dict, produce_kafka: bool=True) -> None:
+async def update_check_and_catalog(check_data: dict) -> None:
     """Update the catalog and checks tables"""
     context.monitor().set_status('Updating checks and catalog...')
     pool = await context.pool()
@@ -62,11 +62,11 @@ async def update_check_and_catalog(check_data: dict, produce_kafka: bool=True) -
             rows = await connection.fetch(f'''
                 SELECT resource_id, priority, initialization FROM catalog WHERE url = '{check_data['url']}';
             ''')
-            last_checks = [{'resource_id': row[0], 'priority': row[1], 'initialization': row[2], 'status': None} for row in rows]
+            last_checks = [{'resource_id': row[0], 'priority': row[1], 'initialization': row[2], 'status': None, 'timeout': None} for row in rows]
 
         # There could be multiple resources pointing to the same URL
         for last_check in last_checks:
-            if produce_kafka and (last_check is None \
+            if config.ENABLE_KAFKA and (last_check is None \
                 or ('status' in check_data and check_data['status'] != last_check['status']) or ('status' not in check_data and last_check['status'] is not None) \
                 or check_data['timeout'] != last_check['timeout']):
                 log.debug('Sending message to Kafka...')
@@ -135,8 +135,7 @@ async def check_url(row, session, sleep=0, method='head'):
                 'url': row['url'],
                 'error': 'Not netloc in url',
                 'timeout': False,
-            },
-            produce_kafka=config.ENABLE_KAFKA
+            }
         )
         return STATUS_ERROR
 
