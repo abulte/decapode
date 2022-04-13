@@ -1,5 +1,4 @@
 import json
-
 from kafka import KafkaProducer
 
 from decapode.config import KAFKA_URI

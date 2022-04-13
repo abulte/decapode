@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 import pytest
 
 import nest_asyncio

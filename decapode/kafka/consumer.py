@@ -25,7 +25,7 @@ async def consume_kafka_datasets() -> None:
         auto_offset_reset='smallest' # TODO: Check if it should be removed in prod
     )
 
-    log.debug('Consuming dataset topic...')
+    log.info('Consuming dataset topic...')
     for message in consumer:
         log.debug('Received message')
         message_contents = json.loads(message.value)
