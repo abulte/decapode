@@ -17,6 +17,13 @@ pytestmark = pytest.mark.asyncio
 nest_asyncio.apply()
 
 
+@pytest.fixture(autouse=True)
+async def mock_produce(mocker):
+    """This avoids connecting to Kafka broker"""
+    m = mocker.patch("decapode.crawl.produce")
+    m.return_value = None
+
+
 async def test_catalog(setup_catalog, db):
     res = await db.fetch(
         "SELECT * FROM catalog WHERE resource_id = $1",
