@@ -60,9 +60,9 @@ async def update_check_and_catalog(check_data: dict) -> None:
         if len(last_checks) == 0:
             # In case we are doing our first check for given URL
             rows = await connection.fetch(f'''
-                SELECT resource_id, priority, initialization FROM catalog WHERE url = '{check_data['url']}';
+                SELECT resource_id, dataset_id, priority, initialization FROM catalog WHERE url = '{check_data['url']}';
             ''')
-            last_checks = [{'resource_id': row[0], 'priority': row[1], 'initialization': row[2], 'status': None, 'timeout': None} for row in rows]
+            last_checks = [{'resource_id': row[0], 'dataset_id': row[1], 'priority': row[2], 'initialization': row[3], 'status': None, 'timeout': None} for row in rows]
 
         # There could be multiple resources pointing to the same URL
         for last_check in last_checks:
@@ -71,9 +71,9 @@ async def update_check_and_catalog(check_data: dict) -> None:
                 or check_data['timeout'] != last_check['timeout']):
                 log.debug('Sending message to Kafka...')
                 message_type = 'event-update' if last_check['priority'] else 'initialization' if last_check['initialization'] else 'regular-update'
-                produce(id=str(last_check['resource_id']), data=check_data, message_type=message_type)
+                produce(id=str(last_check['resource_id']), data=check_data, message_type=message_type, dataset_id=last_check['dataset_id'])
 
-        log.debug('Upating priority...')
+        log.debug('Updating priority...')
         await connection.execute(f'''
             UPDATE catalog SET priority = FALSE, initialization = FALSE WHERE url = '{check_data['url']}';
         ''')
