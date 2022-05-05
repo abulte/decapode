@@ -225,7 +225,7 @@ async def crawl_batch():
     pool = await context.pool()
     async with pool.acquire() as connection:
         excluded = get_excluded_clause()
-        # then urls without checks
+        # first urls that are prioritised
         q = f'''
             SELECT * FROM (
                 SELECT DISTINCT(catalog.url)

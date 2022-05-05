@@ -18,7 +18,7 @@ async def consume_kafka_datasets() -> None:
         'resource.modified',
         'resource.deleted',
         bootstrap_servers=KAFKA_URI,
-        group_id=None,
+        group_id='decapode',
         api_version=kafka_api_version,
         reconnect_backoff_max_ms=100000,  # TODO: what value to set here?
         # auto_offset_reset='smallest' # This line can be added for tests to receive messages from the beginning
@@ -26,7 +26,7 @@ async def consume_kafka_datasets() -> None:
 
     log.info('Consuming resource.created & resource.modified topics...')
     for message in consumer:
-        print('Received message')
+        log.info('Received message')
         message_contents = json.loads(message.value)
         topic = message.topic
         dataset_id = message_contents['meta']['dataset_id']
