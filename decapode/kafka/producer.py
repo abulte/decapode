@@ -1,3 +1,4 @@
+from datetime import datetime
 import json
 from kafka import KafkaProducer
 
@@ -31,7 +32,8 @@ def produce(id, data: dict, message_type: str, dataset_id: str = None) -> None:
         'value': data,
         'meta': {
             'dataset_id': dataset_id,
-            'message_type': message_type
+            'message_type': message_type,
+            'datetime': str(datetime.now())
         }
     }
 
