@@ -66,12 +66,16 @@ async def update_check_and_catalog(check_data: dict) -> None:
 
         # There could be multiple resources pointing to the same URL
         for last_check in last_checks:
-            if config.ENABLE_KAFKA and (last_check is None \
-                or ('status' in check_data and check_data['status'] != last_check['status']) or ('status' not in check_data and last_check['status'] is not None) \
-                or check_data['timeout'] != last_check['timeout']):
-                log.debug('Sending message to Kafka...')
-                message_type = 'event-update' if last_check['priority'] else 'initialization' if last_check['initialization'] else 'regular-update'
-                produce(id=str(last_check['resource_id']), data=check_data, message_type=message_type, dataset_id=last_check['dataset_id'])
+            if config.ENABLE_KAFKA:
+                is_first_check = last_check is None
+                status_has_changed = 'status' in check_data and check_data['status'] != last_check['status']
+                status_no_longer_available ='status' not in check_data and last_check['status'] is not None
+                timeout_has_changed = check_data['timeout'] != last_check['timeout']
+
+                if is_first_check or status_has_changed or status_no_longer_available or timeout_has_changed:
+                    log.debug('Sending message to Kafka...')
+                    message_type = 'event-update' if last_check['priority'] else 'initialization' if last_check['initialization'] else 'regular-update'
+                    produce(id=str(last_check['resource_id']), data=check_data, message_type=message_type, dataset_id=last_check['dataset_id'])
 
         log.debug('Updating priority...')
         await connection.execute(f'''
