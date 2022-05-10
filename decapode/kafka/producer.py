@@ -33,7 +33,7 @@ def produce(id, data: dict, message_type: str, dataset_id: str = None) -> None:
         'meta': {
             'dataset_id': dataset_id,
             'message_type': message_type,
-            'datetime': str(datetime.now())
+            'check_date': str(datetime.now())
         }
     }
 
