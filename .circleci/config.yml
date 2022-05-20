@@ -4,8 +4,8 @@ version: 2
 jobs:
   build:
     docker:
-      - image: udata/circleci:2-alpine
-      - image: postgres:11-alpine
+      - image: cimg/python:3.10.4
+      - image: cimg/postgres:11.15.0
         environment:
           POSTGRES_DB: postgres
           POSTGRES_USER: postgres
