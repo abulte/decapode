@@ -38,13 +38,13 @@ jobs:
             - venv
       - run:
           name: Run tests
+          environment:
+            DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
           command: |
             source venv/bin/activate
             make test
       - run:
           name: Build a distributable package
-          environment:
-            DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
           command: |
             source venv/bin/activate
             # Build a wheel release
