@@ -24,6 +24,8 @@ jobs:
             - py-cache-v1-{{ arch }}-{{ .Environment.BASE_BRANCH }}
       - run:
           name: Install python dependencies
+          environment:
+            DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
           command: |
             virtualenv venv
             source venv/bin/activate
