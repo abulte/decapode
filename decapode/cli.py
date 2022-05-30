@@ -6,13 +6,19 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 import aiohttp
+import asyncio
 import asyncpg
 from minicli import cli, run, wrap
 from humanfriendly import parse_size
 from progressist import ProgressBar
+from udata_event_service.consumer import consume_kafka
+
+from decapode.config import KAFKA_URI
+from decapode.kafka.consumer import process_message
 
 
-CATALOG_URL = 'https://www.data.gouv.fr/fr/datasets/r/4babf5f2-6a9c-45b5-9144-ca5eae6a7a6d'
+# CATALOG_URL = 'https://www.data.gouv.fr/fr/datasets/r/4babf5f2-6a9c-45b5-9144-ca5eae6a7a6d'
+CATALOG_URL = 'https://raw.githubusercontent.com/sixtedemaupeou/datalake/main/fake_catalogue.csv'
 
 context = {}
 
@@ -34,6 +40,8 @@ async def init_db(drop=False, table=None, index=False, reindex=False):
             url VARCHAR,
             deleted BOOLEAN NOT NULL,
             last_check INT,
+            priority BOOLEAN NOT NULL,
+            initialization BOOLEAN NOT NULL DEFAULT FALSE,
             UNIQUE(dataset_id, resource_id, url)
         )
     ''')
@@ -88,8 +96,8 @@ async def load_catalog(url=CATALOG_URL):
             bar = ProgressBar(total=len(rows))
             for row in bar.iter(rows):
                 await context['conn'].execute('''
-                    INSERT INTO catalog (dataset_id, resource_id, url, deleted)
-                    VALUES ($1, $2, $3, FALSE)
+                    INSERT INTO catalog (dataset_id, resource_id, url, deleted, priority, initialization)
+                    VALUES ($1, $2, $3, FALSE, FALSE, TRUE)
                     ON CONFLICT (dataset_id, resource_id, url) DO UPDATE SET deleted = FALSE
                 ''', row['dataset.id'], row['id'], row['url'])
         print('Done!')
@@ -192,6 +200,16 @@ def report(filepath=""):
     df = pd.read_sql(sql, con, parse_dates=["last_modified"])
     profile = ProfileReport(df, title="Decapode report", config_file="profiling.yml")
     profile.to_file(filepath or f"reports/{name}")
+
+
+@cli
+def run_kafka_integration() -> None:
+    consume_kafka(
+        kafka_uri=KAFKA_URI,
+        group_id='decapode',
+        topics=['resource.created', 'resource.modified', 'resource.deleted'],
+        message_processing_func=lambda: asyncio.run(process_message)
+    )
 
 
 @wrap

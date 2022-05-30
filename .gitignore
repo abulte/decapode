@@ -1,2 +1,6 @@
 crawl.log
 .coverage
+decapode.egg-info/
+build/
+.vscode/
+**/__pycache__/

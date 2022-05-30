@@ -48,7 +48,7 @@ A curses interface is available via:
 ### Run
 
 ```
-pip install -r requirements.dev.txt
+pip install -r requirements.txt
 adev runserver decapode/app.py
 ```
 
@@ -218,6 +218,12 @@ $ curl -s "http://localhost:8000/api/stats/" | json_pp
 }
 ```
 
+### Using Kafka integration
+
+The `kafka_integration` module retrieves messages with the topics `resource.created`, `resource.modified` and `resource.deleted` sent by `udata`.
+The Kafka instance URI, Decapode API URL and Data Gouv API URL to be used can be defined in `decapode/config` or overwritten with env variables.
+It can be launched using the CLI: `decapode run_kafka_integration`.
+This will mark the corresponding resources as highest priority for the next crawling batch.
 
 ## TODO
 

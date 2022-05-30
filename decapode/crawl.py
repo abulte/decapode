@@ -12,9 +12,10 @@ import aiohttp
 import asyncio
 
 from humanfriendly import parse_timespan
+import kafka
+from udata_event_service.producer import produce
 
-from decapode import config
-from decapode import context
+from decapode import config, context
 
 log = logging.getLogger("decapode")
 
@@ -25,7 +26,7 @@ STATUS_TIMEOUT = 'timeout'
 STATUS_ERROR = 'error'
 
 
-async def insert_check(data):
+async def insert_check(data: dict):
     if 'headers' in data:
         data['headers'] = json.dumps(data['headers'])
     columns = ','.join(data.keys())
@@ -42,6 +43,54 @@ async def insert_check(data):
         q = '''UPDATE catalog SET last_check = $1 WHERE url = $2'''
         await connection.execute(q, last_check['id'], data['url'])
     return last_check['id']
+
+
+async def update_check_and_catalog(check_data: dict) -> None:
+    """Update the catalog and checks tables"""
+    context.monitor().set_status('Updating checks and catalog...')
+    pool = await context.pool()
+    async with pool.acquire() as connection:
+        q = f'''
+            SELECT * FROM catalog JOIN checks
+            ON catalog.last_check = checks.id
+            WHERE catalog.url = '{check_data['url']}';
+        '''
+        last_checks = await connection.fetch(q)
+
+        if len(last_checks) == 0:
+            # In case we are doing our first check for given URL
+            rows = await connection.fetch(f'''
+                SELECT resource_id, dataset_id, priority, initialization FROM catalog WHERE url = '{check_data['url']}';
+            ''')
+            last_checks = [{'resource_id': row[0], 'dataset_id': row[1], 'priority': row[2], 'initialization': row[3], 'status': None, 'timeout': None} for row in rows]
+
+        # There could be multiple resources pointing to the same URL
+        for last_check in last_checks:
+            if config.ENABLE_KAFKA:
+                is_first_check = last_check is None
+                status_has_changed = 'status' in check_data and check_data['status'] != last_check['status']
+                status_no_longer_available ='status' not in check_data and last_check['status'] is not None
+                timeout_has_changed = check_data['timeout'] != last_check['timeout']
+
+                if is_first_check or status_has_changed or status_no_longer_available or timeout_has_changed:
+                    log.debug('Sending message to Kafka...')
+                    message_type = 'event-update' if last_check['priority'] else 'initialization' if last_check['initialization'] else 'regular-update'
+                    meta = {'dataset_id': last_check['dataset_id'], 'message_type': message_type, 'check_date': str(datetime.now())}
+                    produce(
+                        kafka_uri=config.KAFKA_URI,
+                        topic='resource.checked',
+                        service='decapode',
+                        key_id=str(last_check['resource_id']),
+                        document=check_data,
+                        meta=meta,
+                    )
+
+        log.debug('Updating priority...')
+        await connection.execute(f'''
+            UPDATE catalog SET priority = FALSE, initialization = FALSE WHERE url = '{check_data['url']}';
+        ''')
+
+    await insert_check(check_data)
 
 
 async def is_backoff(domain):
@@ -93,11 +142,13 @@ async def check_url(row, session, sleep=0, method='head'):
     domain = url_parsed.netloc
     if not domain:
         log.warning(f"[warning] not netloc in url, skipping {row['url']}")
-        await insert_check({
-            'url': row['url'],
-            'error': 'Not netloc in url',
-            'timeout': False,
-        })
+        await update_check_and_catalog(
+            {
+                'url': row['url'],
+                'error': 'Not netloc in url',
+                'timeout': False,
+            }
+        )
         return STATUS_ERROR
 
     if domain in config.GET_DOMAINS:
@@ -123,14 +174,16 @@ async def check_url(row, session, sleep=0, method='head'):
             if resp.status == 501 and method != 'get':
                 return await check_url(row, session, method='get')
             resp.raise_for_status()
-            await insert_check({
-                'url': row['url'],
-                'domain': domain,
-                'status': resp.status,
-                'headers': convert_headers(resp.headers),
-                'timeout': False,
-                'response_time': end - start,
-            })
+            await update_check_and_catalog(
+                {
+                    'url': row['url'],
+                    'domain': domain,
+                    'status': resp.status,
+                    'headers': convert_headers(resp.headers),
+                    'timeout': False,
+                    'response_time': end - start,
+                }
+            )
             return STATUS_OK
     # TODO: debug AssertionError, should be caught in DB now
     # File "[...]aiohttp/connector.py", line 991, in _create_direct_connection
@@ -139,22 +192,26 @@ async def check_url(row, session, sleep=0, method='head'):
     # eg http://%20Localisation%20des%20acc%C3%A8s%20des%20offices%20de%20tourisme
     except (aiohttp.client_exceptions.ClientError, AssertionError, UnicodeError) as e:
         error = getattr(e, 'message', None) or str(e)
-        await insert_check({
-            'url': row['url'],
-            'domain': domain,
-            'timeout': False,
-            'error': fix_surrogates(error),
-            'headers': convert_headers(getattr(e, 'headers', {})),
-            'status': getattr(e, 'status', None),
-        })
+        await update_check_and_catalog(
+            {
+                'url': row['url'],
+                'domain': domain,
+                'timeout': False,
+                'error': fix_surrogates(error),
+                'headers': convert_headers(getattr(e, 'headers', {})),
+                'status': getattr(e, 'status', None),
+            }
+        )
         log.error(f"{row['url']}, {e}")
         return STATUS_ERROR
     except asyncio.exceptions.TimeoutError:
-        await insert_check({
-            'url': row['url'],
-            'domain': domain,
-            'timeout': True,
-        })
+        await update_check_and_catalog(
+                {
+                    'url': row['url'],
+                    'domain': domain,
+                    'timeout': True,
+                }
+            )
         return STATUS_TIMEOUT
 
 
@@ -180,18 +237,32 @@ async def crawl_batch():
     pool = await context.pool()
     async with pool.acquire() as connection:
         excluded = get_excluded_clause()
-        # urls without checks first
+        # first urls that are prioritised
         q = f'''
             SELECT * FROM (
                 SELECT DISTINCT(catalog.url)
                 FROM catalog
-                WHERE catalog.last_check IS NULL
-                AND {excluded}
+                WHERE {excluded}
                 AND deleted = False
+                AND priority = True
             ) s
             ORDER BY random() LIMIT {config.BATCH_SIZE};
         '''
         to_check = await connection.fetch(q)
+        # then urls without checks
+        if len(to_check) < config.BATCH_SIZE:
+            q = f'''
+                SELECT * FROM (
+                    SELECT DISTINCT(catalog.url)
+                    FROM catalog
+                    WHERE catalog.last_check IS NULL
+                    AND {excluded}
+                    AND deleted = False
+                    AND priority = False
+                ) s
+                ORDER BY random() LIMIT {config.BATCH_SIZE};
+            '''
+            to_check += await connection.fetch(q)
         # if not enough for our batch size, handle outdated checks
         if len(to_check) < config.BATCH_SIZE:
             since = parse_timespan(config.SINCE)  # in seconds
@@ -206,6 +277,7 @@ async def crawl_batch():
                 AND catalog.last_check = checks.id
                 AND checks.created_at <= $1
                 AND catalog.deleted = False
+                AND catalog.priority = False
             ) s
             ORDER BY random() LIMIT {limit};
             '''
