@@ -12,10 +12,10 @@ import aiohttp
 import asyncio
 
 from humanfriendly import parse_timespan
+import kafka
+from udata_event_service.producer import produce
 
-from decapode import config
-from decapode import context
-from decapode.kafka.producer import produce
+from decapode import config, context
 
 log = logging.getLogger("decapode")
 
@@ -75,7 +75,15 @@ async def update_check_and_catalog(check_data: dict) -> None:
                 if is_first_check or status_has_changed or status_no_longer_available or timeout_has_changed:
                     log.debug('Sending message to Kafka...')
                     message_type = 'event-update' if last_check['priority'] else 'initialization' if last_check['initialization'] else 'regular-update'
-                    produce(id=str(last_check['resource_id']), data=check_data, message_type=message_type, dataset_id=last_check['dataset_id'])
+                    meta = {'dataset_id': last_check['dataset_id'], 'message_type': message_type, 'check_date': str(datetime.now())}
+                    produce(
+                        kafka_uri=config.KAFKA_URI,
+                        topic='resource.checked',
+                        service='decapode',
+                        key_id=str(last_check['resource_id']),
+                        document=check_data,
+                        meta=meta,
+                    )
 
         log.debug('Updating priority...')
         await connection.execute(f'''

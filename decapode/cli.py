@@ -11,11 +11,14 @@ import asyncpg
 from minicli import cli, run, wrap
 from humanfriendly import parse_size
 from progressist import ProgressBar
+from udata_event_service.consumer import consume_kafka
 
-from decapode.kafka.consumer import consume_kafka_datasets
+from decapode.config import KAFKA_URI
+from decapode.kafka.consumer import process_message
 
 
-CATALOG_URL = 'https://www.data.gouv.fr/fr/datasets/r/4babf5f2-6a9c-45b5-9144-ca5eae6a7a6d'
+# CATALOG_URL = 'https://www.data.gouv.fr/fr/datasets/r/4babf5f2-6a9c-45b5-9144-ca5eae6a7a6d'
+CATALOG_URL = 'https://raw.githubusercontent.com/sixtedemaupeou/datalake/main/fake_catalogue.csv'
 
 context = {}
 
@@ -201,7 +204,12 @@ def report(filepath=""):
 
 @cli
 def run_kafka_integration() -> None:
-    asyncio.run(consume_kafka_datasets())
+    consume_kafka(
+        kafka_uri=KAFKA_URI,
+        group_id='decapode',
+        topics=['resource.created', 'resource.modified', 'resource.deleted'],
+        message_processing_func=lambda: asyncio.run(process_message)
+    )
 
 
 @wrap
